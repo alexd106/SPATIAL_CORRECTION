@@ -1,0 +1,8 @@
+"Method","Residual_SD","r_with_SpATS"
+"SpATS",34.05,NA
+"mgcv",63.01,0.8705
+"mgcv_ps",62.41,0.8715
+"mgcv_ps_re",34.25,0.9996
+"mgcv_highk",61.88,0.8632
+"mgcv_ad",62.61,0.8654
+"sommer",33.18,0.9922

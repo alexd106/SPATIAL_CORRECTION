@@ -27,7 +27,7 @@ knitr::opts_chunk$set(
 
 `simulate_spatial_data.R` provides three functions for generating and visualising
 synthetic multi-environment field trial data. The simulated data is intended
-as a test input for the spatial correction pipeline in `SpatialCorrectionGAMM.R`.
+as a test input for the spatial correction pipeline in `SpatialCorrectionFlexible.R`.
 
 **Experimental design simulated:**
 
@@ -62,7 +62,7 @@ source("../scripts/simulate_spatial_data.R")
 
 Generates a complete multi-bench dataset. Returns a list with three elements:
 
-- `$data` — the plot-level data frame (`Bench`, `Genotype`, `Row`, `Col`, `<pheno_name>`)
+- `$data` — the plot-level data frame (`Bench`, `Genotype`, `Row`, `Col`, `True_Spatial`, `<pheno_name>`)
 - `$true_effects` — the underlying genotype effects used to generate the data (`Genotype`, `True_<pheno_name>`)
 - `$pheno_name` — the name of the phenotype column (useful for passing to plot functions)
 
@@ -81,7 +81,9 @@ bench dimensions automatically sets the number of genotypes.
 | `sd_geno` | `12` | SD of true genotype effects — larger values produce more spread between genotypes. |
 | `spatial_type` | `5` | Spatial pattern type (see table below). |
 | `spatial_intensity` | `30` | Peak magnitude of the spatial gradient in phenotype units, interpreted relative to `sd_geno`: **0** = no effect; **< sd_geno** = subtle (spatial < genetic variation, BLUPs easily recovered); **~ sd_geno** = moderate (realistic for most trials); **> sd_geno** = strong (spatial dominates, correction critical); **>> sd_geno** = extreme (observed values likely exceed `[pheno_min, pheno_max]`). |
-| `spatial_scale` | `1` | Steepness/bandwidth multiplier. Types 2, 3, 4: `1` = full gradient from edge to edge; `< 1` = shallower; `> 1` = peaks before the far edge then descends. Type 5: `> 1` = broader Gaussian patch; `< 1` = sharper spotlight. |
+| `spatial_scale` | `1` | Steepness/bandwidth multiplier. Types 2, 3, 4: `1` = full gradient from edge to edge; `< 1` = shallower; `> 1` = peaks before the far edge then descends. Type 5: `> 1` = broader Gaussian patch; `< 1` = sharper spotlight. Type 6: `> 1` = sharper edge band; `< 1` = broader decay into interior. Type 7: `> 1` = wider hotspot; `< 1` = more compact. |
+| `spatial_intensity_per_bench` | `NULL` | Numeric vector of length `n_bench`. When supplied, overrides `spatial_intensity` with a different peak magnitude for each bench. Useful for testing heterogeneous spatial severity (e.g., `c(15, 25, 40, 60)`). |
+| `spatial_type_per_bench` | `NULL` | Integer vector of length `n_bench`. When supplied, overrides `spatial_type` with a different pattern type for each bench. |
 | `sd_error` | `4` | Plot-level random noise SD (measurement and microenvironment error). |
 | `pheno_min` | `0` | Lower bound — true genotype effects are clipped to `[pheno_min, pheno_max]`. |
 | `pheno_max` | `100` | Upper bound for genotype effect clipping. |
@@ -92,13 +94,17 @@ bench dimensions automatically sets the number of genotypes.
 
 #### Spatial pattern types (`spatial_type`)
 
-| Value | Pattern | Description |
-|---|---|---|
-| `1` | No spatial effect | 0 everywhere |
-| `2` | Row gradient | Starts at 0 at row 1, rises toward the last row (half-sine); uniform across columns |
-| `3` | Column gradient | Starts at 0 at col 1, rises toward the last column (half-sine); uniform across rows |
-| `4` | Row + column gradient | Additive combination of types 2 and 3 (both starting at edge 1); `spatial_intensity` split equally between directions |
-| `5` | Central patch | Gaussian spotlight centred on the bench; sigma scaled to bench dimensions (`σ = n/4 × spatial_scale`) |
+| Value | Pattern | Centred | Description |
+|---|---|---|---|
+| `1` | No spatial effect | — | 0 everywhere |
+| `2` | Row gradient | Yes | Starts at 0 at row 1, rises toward the last row (half-sine); uniform across columns |
+| `3` | Column gradient | Yes | Starts at 0 at col 1, rises toward the last column (half-sine); uniform across rows |
+| `4` | Row + column gradient | Yes | Additive combination of types 2 and 3; `spatial_intensity` split equally between directions |
+| `5` | Central patch | Yes | Gaussian spotlight centred on the bench; sigma scaled to bench dimensions (`σ = n/4 × spatial_scale`) |
+| `6` | Edge effects | Yes | Elevated at bench borders with diagonal asymmetry (top-left high, bottom-right low); mimics glasshouse edge drying, irrigation run-off, and asymmetric light/wind exposure |
+| `7` | Localised hotspot | Yes | Gaussian bell at an off-centre position (~35% along rows, ~65% along columns); mimics a point-source disturbance such as a roof leak or faulty irrigation emitter, affecting ~20% of pots at `spatial_scale = 1` |
+
+**Centring:** All types except type 1 are centred to mean zero per bench (`raw - mean(raw)`). This ensures the spatial component represents deviations from the bench mean rather than an absolute level shift, which is the correct parameterisation for joint multi-bench models where the spatial smooth is zero-mean constrained.
 
 The data-generating model for each plot is:
 
@@ -106,10 +112,9 @@ $$y_{ij} = g_i + s_j + \varepsilon_{ij}$$
 
 where $g_i \sim N(\mu_g, \sigma_g^2)$ clipped to [`pheno_min`, `pheno_max`]
 is the true genotype effect (`mean_pheno`, `sd_geno`),
-$s_j$ is the spatial contribution at plot $j$ (determined by `spatial_type` and `spatial_intensity`),
+$s_j$ is the spatial contribution at plot $j$ (determined by `spatial_type` and `spatial_intensity`, centred to mean zero),
 and $\varepsilon_{ij} \sim N(0, \sigma_e^2)$ is random plot-level noise (`sd_error`).
-The true genotype effects $g_i$ are stored in `$true_effects` and are used after
-spatial correction to validate BLUP recovery via Pearson correlation.
+The true genotype effects $g_i$ are stored in `$true_effects`, and the per-plot spatial contributions are stored in the `True_Spatial` column of `$data`. Both are used after spatial correction to validate BLUE/BLUP recovery via Pearson correlation and RMSE.
 When `save_csv = TRUE` (default), `<pheno_name>_simulation.csv` and
 `<pheno_name>_true_effects.csv` are written automatically to `output_dir`.
 
@@ -365,12 +370,90 @@ p_shared + p_indep
 
 ---
 
-### 7. Inspecting the true genotype effects
+### 7. Edge effects and hotspot patterns (types 6 and 7)
+
+Types 6 and 7 are more realistic patterns for glasshouse trials. Type 6 combines a border-proximity effect with a diagonal asymmetry (top-left elevated, bottom-right depressed). Type 7 places a compact Gaussian bell at an off-centre position mimicking a localised disturbance.
+
+```{r sim-edge-hotspot, fig.height=4}
+library(patchwork)
+
+sim_edge <- simulate_field_trial(
+  spatial_type      = 6,
+  spatial_intensity = 30,
+  pheno_name        = "BNI",
+  save_csv          = FALSE,
+  seed              = 42
+)
+
+sim_hotspot <- simulate_field_trial(
+  spatial_type      = 7,
+  spatial_intensity = 30,
+  pheno_name        = "BNI",
+  save_csv          = FALSE,
+  seed              = 42
+)
+
+# Plot the true spatial component for Bench1 of each type
+lims_edge <- range(sim_edge$data$True_Spatial)
+lims_hot  <- range(sim_hotspot$data$True_Spatial)
+
+p_edge <- plot_bench_heatmap(sim_edge$data, pheno = "True_Spatial",
+                              bench = "Bench1",
+                              bench_label = "Type 6: edge effects",
+                              shared_limits = lims_edge)
+
+p_hot <- plot_bench_heatmap(sim_hotspot$data, pheno = "True_Spatial",
+                             bench = "Bench1",
+                             bench_label = "Type 7: localised hotspot",
+                             shared_limits = lims_hot)
+
+p_edge + p_hot
+```
+
+The edge-effect pattern is highest at all four borders and lowest in the interior, with a diagonal asymmetry (top-left corner is more elevated than bottom-right). The hotspot is a compact circular region in the upper-right quadrant; outside it the surface is slightly negative (because the pattern is centred to mean zero).
+
+---
+
+### 8. Per-bench spatial intensity
+
+Use `spatial_intensity_per_bench` to assign a different spatial severity to each bench. This is the typical validation design used in the spatial correction report: four benches with intensities 15, 25, 40, 60 — ranging from moderate (intensity < genotype SD) to strong (intensity > genotype SD).
+
+```{r sim-per-bench, fig.height=9, fig.width=14}
+sim_varying <- simulate_field_trial(
+  n_bench                     = 4,
+  spatial_type                = 6,
+  spatial_intensity           = 30,          # fallback (unused when per_bench supplied)
+  spatial_type_per_bench      = rep(6, 4),
+  spatial_intensity_per_bench = c(15, 25, 40, 60),
+  pheno_name                  = "BNI",
+  save_csv                    = FALSE,
+  seed                        = 42
+)
+
+lims <- range(sim_varying$data$True_Spatial)
+
+panels <- lapply(paste0("Bench", 1:4), function(bn) {
+  intensity <- c(15, 25, 40, 60)[as.integer(sub("Bench", "", bn))]
+  plot_bench_heatmap(sim_varying$data, pheno = "True_Spatial",
+                     bench = bn,
+                     bench_label = paste0(bn, " (intensity = ", intensity, ")"),
+                     shared_limits = lims)
+})
+
+wrap_plots(panels, ncol = 2) +
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "True spatial pattern: type 6 (edge effects)",
+                  subtitle = "Shared colour scale — intensities 15, 25, 40, 60")
+```
+
+With a shared colour scale, the 4-fold increase in spatial severity from Bench1 to Bench4 is immediately visible.
+
+---
+
+### 9. Inspecting the true genotype effects
 
 `$true_effects` contains the latent genotype values used to generate the data.
-After running `SpatialCorrectionGAMM.R`, the Pearson correlation between these
-true effects and the extracted BLUPs quantifies how well the spatial correction
-has recovered the signal.
+After running `SpatialCorrectionFlexible.R`, the Pearson correlation and RMSE between these true effects and the extracted BLUEs (or BLUPs) quantify how well the spatial correction has recovered the signal.
 
 ```{r true-effects, fig.height=3.5, fig.width=5}
 head(sim_cols$true_effects)
@@ -427,6 +510,8 @@ to the document location (i.e. `docs/data/`):
 | `heatmap_type3_cols_2col.png` | Composite heatmap — column gradient, 2 panels per row |
 | `heatmap_type3_cols_1col.png` | Composite heatmap — column gradient, 1 panel per row |
 | `heatmap_true_effects.png` | Composite heatmap — true genotype effects across all benches |
+
+**Note:** Examples using `save_csv = FALSE` (sections 7–8) do not write CSV files.
 
 ### Running the script directly
 

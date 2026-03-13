@@ -14,12 +14,18 @@ library(patchwork)
 #' @param grid              data.frame with Row and Col columns
 #' @param n_rows            number of rows in bench
 #' @param n_cols            number of columns in bench
-#' @param spatial_type      integer 1-5:
+#' @param spatial_type      integer 1-7:
 #'                            1 = no spatial effect
 #'                            2 = row gradient (half-sine from row 1 to last row)
 #'                            3 = column gradient (half-sine from col 1 to last col)
 #'                            4 = row + column gradient (additive combination of 2 and 3)
 #'                            5 = central patch (Gaussian spotlight at bench centre)
+#'                            6 = edge effects (elevated at borders with diagonal
+#'                                asymmetry; mimics irrigation/light gradients)
+#'                            7 = localised hotspot (Gaussian bell at an off-centre
+#'                                position; mimics a point-source disturbance such as
+#'                                a roof leak or faulty irrigation emitter, affecting
+#'                                ~20% of pots at spatial_scale = 1)
 #' @param spatial_intensity peak magnitude of spatial effect in phenotype units
 #' @param spatial_scale     bandwidth multiplier (default 1):
 #'                            types 2, 3, 4 — steepness of gradient
@@ -38,34 +44,99 @@ compute_spatial <- function(grid, n_rows, n_cols, spatial_type,
 
     "2" = {
       # Half-sine gradient along rows: starts at 0 at row 1, rises toward last row.
-      spatial_intensity * sin(pi / 2 * (grid$Row - 1) * spatial_scale / (n_rows - 1))
+      # Centred to mean zero so the spatial mean does not leak into genotype BLUEs.
+      raw <- spatial_intensity * sin(pi / 2 * (grid$Row - 1) * spatial_scale / (n_rows - 1))
+      raw - mean(raw)
     },
 
     "3" = {
       # Half-sine gradient along columns: starts at 0 at col 1, rises toward last col.
-      spatial_intensity * sin(pi / 2 * (grid$Col - 1) * spatial_scale / (n_cols - 1))
+      # Centred to mean zero so the spatial mean does not leak into genotype BLUEs.
+      raw <- spatial_intensity * sin(pi / 2 * (grid$Col - 1) * spatial_scale / (n_cols - 1))
+      raw - mean(raw)
     },
 
     "4" = {
       # Additive combination of row and column gradients, both starting at edge 1.
       # spatial_intensity is split equally between the two directions.
+      # Centred to mean zero.
       row_effect <- sin(pi / 2 * (grid$Row - 1) * spatial_scale / (n_rows - 1))
       col_effect <- sin(pi / 2 * (grid$Col - 1) * spatial_scale / (n_cols - 1))
-      spatial_intensity * (row_effect + col_effect) / 2
+      raw <- spatial_intensity * (row_effect + col_effect) / 2
+      raw - mean(raw)
     },
 
     "5" = {
       # Gaussian spotlight at bench centre; spatial_scale controls sigma.
+      # Centred to mean zero so the spatial mean does not leak into genotype BLUEs.
       sigma_r <- (n_rows / 4) * spatial_scale
       sigma_c <- (n_cols / 4) * spatial_scale
-      spatial_intensity * exp(-(
+      raw <- spatial_intensity * exp(-(
         (grid$Row - cr)^2 / (2 * sigma_r^2) +
         (grid$Col - cc)^2 / (2 * sigma_c^2)
       ))
+      raw - mean(raw)
     },
 
-    stop("spatial_type must be 1 (none), 2 (row gradient), 3 (column gradient), ",
-         "4 (row + column gradient), or 5 (central patch)")
+    "6" = {
+      # Edge effects with diagonal asymmetry (zero-centred).
+      # Combines: (a) border-proximity effect (high at edges, low in centre)
+      #           (b) diagonal gradient (top-left high, bottom-right low)
+      # This mimics common glasshouse/field patterns (irrigation gradients,
+      # bench-edge drying, light or wind exposure asymmetry).
+      #
+      # spatial_scale controls falloff sharpness:
+      #   1 = linear decay from edges; >1 = sharper edge band; <1 = broader
+      # The diagonal asymmetry adds ~40% of the intensity range.
+      # The pattern is centred to mean zero so it represents deviations
+      # from the overall bench mean (comparable to how both fixed and random
+      # spatial models estimate deviations).
+
+      # Normalised distance from nearest edge (0 at edge, 1 at centre)
+      d_row <- pmin(grid$Row - 1, n_rows - grid$Row) / ((n_rows - 1) / 2)
+      d_col <- pmin(grid$Col - 1, n_cols - grid$Col) / ((n_cols - 1) / 2)
+      d_edge <- pmin(d_row, d_col)   # 0 at any edge, 1 at deepest interior
+
+      # Edge component: high at borders, decays toward centre
+      edge_effect <- (1 - d_edge^spatial_scale) * 0.6
+
+      # Diagonal asymmetry: top-left corner is high, bottom-right is low
+      diag_effect <- ((n_rows - grid$Row) / (n_rows - 1) +
+                      (n_cols - grid$Col) / (n_cols - 1)) / 2 * 0.4
+
+      raw <- spatial_intensity * (edge_effect + diag_effect)
+      raw - mean(raw)   # centre to mean zero
+    },
+
+    "7" = {
+      # Localised hotspot — Gaussian bell at an off-centre position.
+      # Mimics a point-source disturbance (e.g., a roof leak, faulty irrigation
+      # emitter) that elevates values in a compact circular region.
+      #
+      # Centre is fixed at ~35% along rows and ~65% along columns — upper-right
+      # quadrant of the bench.
+      # spatial_scale controls spread: 1 = sigma ≈ 0.17 in normalised [0,1]
+      # coordinates, giving ~20% of pots within the effective radius.
+      # Centred to mean zero so the hotspot represents a localised deviation
+      # rather than an overall bench-level offset.
+
+      cr_hot <- 0.35 * (n_rows - 1) + 1   # e.g. row ~4 in a 10-row bench
+      cc_hot <- 0.65 * (n_cols - 1) + 1   # e.g. col ~20 in a 30-col bench
+
+      # Normalised distances (each direction scaled to [0, 1])
+      d_row <- (grid$Row - cr_hot) / n_rows
+      d_col <- (grid$Col - cc_hot) / n_cols
+
+      # sigma ≈ 0.17 → effective radius ≈ 1.5 sigma → ~20% coverage at scale = 1
+      sigma <- spatial_scale * 0.17
+
+      raw <- spatial_intensity * exp(-(d_row^2 + d_col^2) / (2 * sigma^2))
+      raw - mean(raw)   # centre to mean zero
+    },
+
+    stop("spatial_type must be 1-7: 1 (none), 2 (row gradient, centred), ",
+         "3 (col gradient, centred), 4 (row + col gradient, centred), ",
+         "5 (central patch, centred), 6 (edge effects, centred), or 7 (hotspot, centred)")
   )
 }
 
@@ -92,14 +163,19 @@ compute_spatial <- function(grid, n_rows, n_cols, spatial_type,
 #' @param n_cols           columns per bench; n_rows * n_cols genotypes are simulated
 #' @param mean_pheno       grand mean of the phenotype (centre of genotype distribution)
 #' @param sd_geno          SD of true genotype effects
-#' @param spatial_type     integer 1-5: 1=none, 2=row gradient, 3=col gradient,
-#'                           4=row+col gradient, 5=central patch
+#' @param spatial_type     integer 1-7: 1=none, 2=row gradient, 3=col gradient,
+#'                           4=row+col gradient, 5=central patch, 6=edge effects,
+#'                           7=localised hotspot
 #' @param spatial_intensity  peak magnitude of the spatial gradient in phenotype units
 #' @param spatial_scale    bandwidth multiplier (default 1); see compute_spatial()
 #' @param sd_error         plot-level random noise SD
 #' @param pheno_min        lower clip applied to true genotype effects
 #' @param pheno_max        upper clip applied to true genotype effects
 #' @param pheno_name       name of the phenotype column in output
+#' @param spatial_intensity_per_bench  numeric vector of length n_bench (optional);
+#'                           per-bench spatial intensity. NULL = use scalar spatial_intensity
+#' @param spatial_type_per_bench  integer vector of length n_bench (optional);
+#'                           per-bench spatial type. NULL = use scalar spatial_type
 #' @param save_csv         if TRUE (default), write CSV files to output_dir
 #' @param output_dir       directory for CSV output; created if it does not exist
 #' @param seed             random seed for reproducibility
@@ -116,6 +192,8 @@ simulate_field_trial <- function(n_bench           = 4,
                                   pheno_min         = 0,
                                   pheno_max         = 100,
                                   pheno_name        = "BNI",
+                                  spatial_intensity_per_bench = NULL,
+                                  spatial_type_per_bench      = NULL,
                                   save_csv          = TRUE,
                                   output_dir        = "data",
                                   seed              = 42) {
@@ -133,14 +211,19 @@ simulate_field_trial <- function(n_bench           = 4,
     grid$Bench    <- paste0("Bench", b)
     grid$Genotype <- sample(genotypes)
 
-    grid$spatial <- compute_spatial(grid, n_rows, n_cols,
-                                    spatial_type, spatial_intensity, spatial_scale)
+    b_type      <- if (!is.null(spatial_type_per_bench))
+                     spatial_type_per_bench[b] else spatial_type
+    b_intensity <- if (!is.null(spatial_intensity_per_bench))
+                     spatial_intensity_per_bench[b] else spatial_intensity
+
+    grid$True_Spatial <- compute_spatial(grid, n_rows, n_cols,
+                                         b_type, b_intensity, spatial_scale)
 
     grid[[pheno_name]] <- geno_true[match(grid$Genotype, genotypes)] +
-                          grid$spatial +
+                          grid$True_Spatial +
                           rnorm(nrow(grid), 0, sd_error)
 
-    grid[, c("Bench", "Genotype", "Row", "Col", pheno_name)]
+    grid[, c("Bench", "Genotype", "Row", "Col", "True_Spatial", pheno_name)]
   })
 
   sim_df           <- do.call(rbind, bench_list)

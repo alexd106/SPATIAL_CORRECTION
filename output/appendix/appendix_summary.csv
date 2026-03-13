@@ -1,0 +1,10 @@
+"Pattern","Approach","r","RMSE"
+"Row gradient","Uncorrected",0.8801,6.56
+"Row gradient","SpATS BLUPs (avg)",0.985,6.04
+"Row gradient","Joint mgcv BLUEs",0.9864,2.07
+"Column gradient","Uncorrected",0.8667,6.58
+"Column gradient","SpATS BLUPs (avg)",0.9853,6.03
+"Column gradient","Joint mgcv BLUEs",0.9866,2.04
+"Localised hotspot","Uncorrected",0.9145,5.43
+"Localised hotspot","SpATS BLUPs (avg)",0.9805,6.26
+"Localised hotspot","Joint mgcv BLUEs",0.9837,2.26

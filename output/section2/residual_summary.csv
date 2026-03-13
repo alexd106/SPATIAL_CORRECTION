@@ -1,0 +1,9 @@
+"Bench","Intensity","Method","Residual_SD"
+"Bench1",15,"mgcv_joint",3.3028915893951
+"Bench1",15,"sommer_joint",3.28104348859877
+"Bench2",25,"mgcv_joint",3.26964965144144
+"Bench2",25,"sommer_joint",3.34950728828151
+"Bench3",40,"mgcv_joint",3.28734611602141
+"Bench3",40,"sommer_joint",3.30084488934276
+"Bench4",60,"mgcv_joint",3.42010904304015
+"Bench4",60,"sommer_joint",3.58309222532621
