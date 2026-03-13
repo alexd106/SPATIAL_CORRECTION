@@ -31,7 +31,7 @@ as a test input for the spatial correction pipeline in `SpatialCorrectionFlexibl
 
 **Experimental design simulated:**
 
-- Unreplicated multi-bench trial — each genotype appears once per bench
+- Unreplicated multi-bench trial: each genotype appears once per bench
 - Each bench is laid out on a regular row × column grid
 - The observed phenotype is the sum of a true genotype effect, a configurable
   spatial environmental gradient, and random plot-level noise
@@ -62,14 +62,14 @@ source("../scripts/simulate_spatial_data.R")
 
 Generates a complete multi-bench dataset. Returns a list with three elements:
 
-- `$data` — the plot-level data frame (`Bench`, `Genotype`, `Row`, `Col`, `True_Spatial`, `<pheno_name>`)
-- `$true_effects` — the underlying genotype effects used to generate the data (`Genotype`, `True_<pheno_name>`)
-- `$pheno_name` — the name of the phenotype column (useful for passing to plot functions)
+- `$data`: the plot-level data frame (`Bench`, `Genotype`, `Row`, `Col`, `True_Spatial`, `<pheno_name>`)
+- `$true_effects`: the underlying genotype effects used to generate the data (`Genotype`, `True_<pheno_name>`)
+- `$pheno_name`: the name of the phenotype column (useful for passing to plot functions)
 
 #### Parameters
 
 The number of genotypes is always derived as `n_rows × n_cols`, giving exactly
-one replicate per genotype per bench. There is no `n_geno` argument — changing
+one replicate per genotype per bench. There is no `n_geno` argument; changing
 bench dimensions automatically sets the number of genotypes.
 
 | Parameter | Default | Description |
@@ -78,14 +78,14 @@ bench dimensions automatically sets the number of genotypes.
 | `n_rows` | `10` | Rows per bench. |
 | `n_cols` | `30` | Columns per bench. `n_rows × n_cols` genotypes are simulated. |
 | `mean_pheno` | `55` | Grand mean of the phenotype (centre of the genotype distribution). |
-| `sd_geno` | `12` | SD of true genotype effects — larger values produce more spread between genotypes. |
+| `sd_geno` | `12` | SD of true genotype effects: larger values produce more spread between genotypes. |
 | `spatial_type` | `5` | Spatial pattern type (see table below). |
 | `spatial_intensity` | `30` | Peak magnitude of the spatial gradient in phenotype units, interpreted relative to `sd_geno`: **0** = no effect; **< sd_geno** = subtle (spatial < genetic variation, BLUPs easily recovered); **~ sd_geno** = moderate (realistic for most trials); **> sd_geno** = strong (spatial dominates, correction critical); **>> sd_geno** = extreme (observed values likely exceed `[pheno_min, pheno_max]`). |
 | `spatial_scale` | `1` | Steepness/bandwidth multiplier. Types 2, 3, 4: `1` = full gradient from edge to edge; `< 1` = shallower; `> 1` = peaks before the far edge then descends. Type 5: `> 1` = broader Gaussian patch; `< 1` = sharper spotlight. Type 6: `> 1` = sharper edge band; `< 1` = broader decay into interior. Type 7: `> 1` = wider hotspot; `< 1` = more compact. |
 | `spatial_intensity_per_bench` | `NULL` | Numeric vector of length `n_bench`. When supplied, overrides `spatial_intensity` with a different peak magnitude for each bench. Useful for testing heterogeneous spatial severity (e.g., `c(15, 25, 40, 60)`). |
 | `spatial_type_per_bench` | `NULL` | Integer vector of length `n_bench`. When supplied, overrides `spatial_type` with a different pattern type for each bench. |
 | `sd_error` | `4` | Plot-level random noise SD (measurement and microenvironment error). |
-| `pheno_min` | `0` | Lower bound — true genotype effects are clipped to `[pheno_min, pheno_max]`. |
+| `pheno_min` | `0` | Lower bound: true genotype effects are clipped to `[pheno_min, pheno_max]`. |
 | `pheno_max` | `100` | Upper bound for genotype effect clipping. |
 | `pheno_name` | `"BNI"` | Name given to the phenotype column in the output. |
 | `save_csv` | `TRUE` | If `TRUE`, writes `<pheno_name>_simulation.csv` and `<pheno_name>_true_effects.csv` to `output_dir`. |
@@ -96,7 +96,7 @@ bench dimensions automatically sets the number of genotypes.
 
 | Value | Pattern | Centred | Description |
 |---|---|---|---|
-| `1` | No spatial effect | — | 0 everywhere |
+| `1` | No spatial effect | - | 0 everywhere |
 | `2` | Row gradient | Yes | Starts at 0 at row 1, rises toward the last row (half-sine); uniform across columns |
 | `3` | Column gradient | Yes | Starts at 0 at col 1, rises toward the last column (half-sine); uniform across rows |
 | `4` | Row + column gradient | Yes | Additive combination of types 2 and 3; `spatial_intensity` split equally between directions |
@@ -123,20 +123,20 @@ When `save_csv = TRUE` (default), `<pheno_name>_simulation.csv` and
 ### `plot_bench_heatmap()`
 
 Plots the field layout for a **single bench** as a coloured tile grid.
-Returns a `ggplot` object — it can be further customised with `ggplot2` layers
+Returns a `ggplot` object that can be further customised with `ggplot2` layers
 or composed into multi-panel figures with `patchwork`.
 
 #### Parameters
 
 | Parameter | Default | Description |
 |---|---|---|
-| `bench_dfr` | — | Data frame containing the bench data. Pass the full dataset when using `bench`, or a pre-subsetted single-bench frame when `bench = NULL`. |
-| `pheno` | — | Name of the response column to use as the fill colour. |
+| `bench_dfr` | none | Data frame containing the bench data. Pass the full dataset when using `bench`, or a pre-subsetted single-bench frame when `bench = NULL`. |
+| `pheno` | none | Name of the response column to use as the fill colour. |
 | `rn` | `"Row"` | Name of the row position column. |
 | `cn` | `"Col"` | Name of the column position column. |
 | `gt` | `"Genotype"` | Name of the genotype column (only used when `show_labels = TRUE`). |
 | `bench_col` | `"Bench"` | Name of the bench identifier column; used only when `bench` is specified. |
-| `bench` | `NULL` | Bench identifier to select from `bench_dfr`. When set, the function subsets the data internally — no need to pre-filter. |
+| `bench` | `NULL` | Bench identifier to select from `bench_dfr`. When set, the function subsets the data internally (no pre-filtering needed). |
 | `bench_label` | `""` | Title displayed above the panel. Defaults to the `bench` value when `bench` is specified. |
 | `show_labels` | `FALSE` | If `TRUE`, genotype names are printed inside each tile. |
 | `shared_limits` | `NULL` | `c(min, max)` for the fill colour scale. Pass the global range across all benches to make scales comparable. `NULL` = auto-scale to this bench only. |
@@ -158,8 +158,8 @@ composite figure as a PNG file.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `dfr` | — | Full data frame (all benches). |
-| `pheno` | — | Name of the response column. |
+| `dfr` | none | Full data frame (all benches). |
+| `pheno` | none | Name of the response column. |
 | `rn` | `"Row"` | Row column name. |
 | `cn` | `"Col"` | Column column name. |
 | `gt` | `"Genotype"` | Genotype column name. |
@@ -205,7 +205,7 @@ plot_all_bench_heatmaps(
 ```
 
 With no spatial effect the colour pattern across each bench is essentially
-random — no structure is visible.
+random, so no structure is visible.
 
 ---
 
@@ -242,7 +242,7 @@ plot_all_bench_heatmaps(
 ```
 
 Vertical bands of colour are visible, with the lowest values at column 1 and
-the highest at the last column — a clear monotonic column-wise gradient.
+the highest at the last column, forming a clear monotonic column-wise gradient.
 
 ---
 
@@ -271,7 +271,7 @@ p_all
 ```
 
 Setting `ncol_panels = 1` arranges benches in a single column so each fills
-the full width — useful when benches are wide (many columns) and side-by-side
+the full width, which is useful when benches are wide (many columns) and side-by-side
 panels would be too narrow to read:
 
 ```{r multi-bench-1col, fig.height=16, fig.width=9}
@@ -295,15 +295,14 @@ p_all1
 
 `plot_bench_heatmap()` returns a `ggplot` object for a single bench,
 allowing further customisation or composition with `patchwork`. Pass the full
-dataset and specify `bench` to select which bench to plot — no need to
-pre-subset the data.
+dataset and specify `bench` to select which bench to plot (no pre-subsetting needed).
 
 ```{r single-bench, fig.height=4, fig.width=7}
 plot_bench_heatmap(
   bench_dfr   = sim_cols$data,
   pheno       = "BNI",
   bench       = "Bench1",
-  bench_label = "Bench 1 — raw observed BNI",
+  bench_label = "Bench 1: raw observed BNI",
   show_labels = FALSE
 )
 ```
@@ -329,7 +328,7 @@ sim_small <- simulate_field_trial(
 plot_bench_heatmap(
   bench_dfr   = sim_small$data,
   pheno       = "BNI",
-  bench_label = "Bench 1 — with genotype labels",
+  bench_label = "Bench 1: with genotype labels",
   show_labels = TRUE,
   label_size  = 3
 )
@@ -416,7 +415,7 @@ The edge-effect pattern is highest at all four borders and lowest in the interio
 
 ### 8. Per-bench spatial intensity
 
-Use `spatial_intensity_per_bench` to assign a different spatial severity to each bench. This is the typical validation design used in the spatial correction report: four benches with intensities 15, 25, 40, 60 — ranging from moderate (intensity < genotype SD) to strong (intensity > genotype SD).
+Use `spatial_intensity_per_bench` to assign a different spatial severity to each bench. This is the typical validation design used in the spatial correction report: four benches with intensities 15, 25, 40, 60, ranging from moderate (intensity < genotype SD) to strong (intensity > genotype SD).
 
 ```{r sim-per-bench, fig.height=9, fig.width=14}
 sim_varying <- simulate_field_trial(
@@ -443,7 +442,7 @@ panels <- lapply(paste0("Bench", 1:4), function(bn) {
 wrap_plots(panels, ncol = 2) +
   plot_layout(guides = "collect") +
   plot_annotation(title = "True spatial pattern: type 6 (edge effects)",
-                  subtitle = "Shared colour scale — intensities 15, 25, 40, 60")
+                  subtitle = "Shared colour scale: intensities 15, 25, 40, 60")
 ```
 
 With a shared colour scale, the 4-fold increase in spatial severity from Bench1 to Bench4 is immediately visible.
@@ -469,8 +468,8 @@ To visualise how true genotype values are arranged spatially across all
 benches, merge `$true_effects` with the plot-level data (which carries the
 Row, Col, and Bench positions) and pass the result to
 `plot_all_bench_heatmaps()`. Because genotypes are randomised independently
-per bench, the spatial pattern of true effects will differ between benches —
-confirming the arrangement is random rather than structured.
+per bench, the spatial pattern of true effects will differ between benches,
+confirming that the arrangement is random rather than structured.
 
 ```{r true-effects-heatmap, fig.height=9, fig.width=14}
 all_true <- merge(
@@ -505,11 +504,11 @@ to the document location (i.e. `docs/data/`):
 |---|---|
 | `BNI_simulation.csv` | Plot-level data for the column-gradient example (section 2) |
 | `BNI_true_effects.csv` | Corresponding latent genotype effects |
-| `heatmap_type1_none.png` | Composite heatmap — no spatial effect |
-| `heatmap_type3_cols.png` | Composite heatmap — column gradient, default layout |
-| `heatmap_type3_cols_2col.png` | Composite heatmap — column gradient, 2 panels per row |
-| `heatmap_type3_cols_1col.png` | Composite heatmap — column gradient, 1 panel per row |
-| `heatmap_true_effects.png` | Composite heatmap — true genotype effects across all benches |
+| `heatmap_type1_none.png` | Composite heatmap: no spatial effect |
+| `heatmap_type3_cols.png` | Composite heatmap: column gradient, default layout |
+| `heatmap_type3_cols_2col.png` | Composite heatmap: column gradient, 2 panels per row |
+| `heatmap_type3_cols_1col.png` | Composite heatmap: column gradient, 1 panel per row |
+| `heatmap_true_effects.png` | Composite heatmap: true genotype effects across all benches |
 
 **Note:** Examples using `save_csv = FALSE` (sections 7–8) do not write CSV files.
 
