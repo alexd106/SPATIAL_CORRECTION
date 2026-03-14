@@ -108,7 +108,7 @@ Functions now available:
 We simulate a multi-bench greenhouse trial with the following structure:
 
 - **4 benches** (Bench1-Bench4)
-- **8 rows x 30 columns** per bench -> **240 genotypes**
+- **6 rows x 15 columns** per bench -> **90 genotypes**
 - Each genotype appears **once per bench** (unreplicated within each bench,
   but with one observation per bench across 4 benches)
 - **Edge-effect spatial pattern** (type 6): values elevated at bench borders
@@ -129,8 +129,8 @@ $\varepsilon_{ij} \sim N(0,\ 4^2)$ is random plot noise.
 ```{r simulate}
 sim <- simulate_field_trial(
   n_bench                     = 4,
-  n_rows                      = 8,
-  n_cols                      = 30,
+  n_rows                      = 6,
+  n_cols                      = 15,
   mean_pheno                  = 55,
   sd_geno                     = 12,
   spatial_type                = 6,          # edge effects
@@ -168,31 +168,17 @@ The `simulate_field_trial()` call writes two files to `docs/data/`:
 ## The raw observed data
 
 ```{r plot-raw, fig.height=6, fig.cap="Raw observed BNI values across all four benches. Note how the colour pattern differs from bench to bench despite genotypes being randomly assigned. This is the spatial signal we need to remove."}
-benches   <- sort(unique(dfr$Bench))
-raw_lims  <- range(dfr[[pheno]], na.rm = TRUE)
+benches <- sort(unique(dfr$Bench))
 
-raw_plots <- lapply(seq_along(benches), function(i) {
-  plot_bench_heatmap(
-    bench_dfr     = dfr[dfr$Bench == benches[i], ],
-    pheno         = pheno,
-    bench_label   = paste0(benches[i], "  (intensity = ",
-                           c(15, 25, 40, 60)[i], ")"),
-    shared_limits = raw_lims
-  )
-})
-
-p_raw <- wrap_plots(raw_plots, ncol = 2) +
-  plot_layout(guides = "collect") +
-  plot_annotation(
-    title    = "Raw observed BNI values",
-    subtitle = "Shared colour scale. Spatial intensity increases Bench1 to Bench4.",
-    theme    = theme(plot.title    = element_text(size = 13, face = "bold"),
-                     plot.subtitle = element_text(size = 9, colour = "grey40"))
-  )
+p_raw <- plot_all_bench_heatmaps(
+  dfr          = dfr,
+  pheno        = pheno,
+  bench_col    = "Bench",
+  shared_scale = TRUE,
+  output_png   = "figures/guide_raw_observed.png",
+  ncol_panels  = 2
+)
 p_raw
-
-ggsave("figures/guide_raw_observed.png", p_raw,
-       width = 14, height = 7, dpi = 150)
 ```
 
 ---
@@ -206,30 +192,20 @@ see the phenotype, which confounds genetics and environment. Here, because we
 simulated the data, we can look at the true spatial contribution at each plot.
 
 ```{r plot-true-spatial, fig.height=6, fig.cap="True spatial contributions used during simulation. The edge-effect pattern is clear: border plots are elevated, interior plots are depressed. The diagonal asymmetry (top-left high, bottom-right low) is also visible. Intensity increases from Bench1 to Bench4."}
-sp_lims <- range(dfr$True_Spatial, na.rm = TRUE)
-
-sp_plots <- lapply(seq_along(benches), function(i) {
-  plot_bench_heatmap(
-    bench_dfr     = dfr[dfr$Bench == benches[i], ],
-    pheno         = "True_Spatial",
-    bench_label   = paste0(benches[i], "  (intensity = ",
-                           c(15, 25, 40, 60)[i], ")"),
-    shared_limits = sp_lims
-  )
-})
-
-p_sp <- wrap_plots(sp_plots, ncol = 2) +
-  plot_layout(guides = "collect") +
-  plot_annotation(
-    title    = "True spatial contributions",
-    subtitle = "Edge-effect pattern (type 6). Values are zero-centred per bench.",
-    theme    = theme(plot.title    = element_text(size = 13, face = "bold"),
-                     plot.subtitle = element_text(size = 9, colour = "grey40"))
-  )
+p_sp <- plot_all_bench_heatmaps(
+  dfr          = dfr,
+  pheno        = "True_Spatial",
+  bench_col    = "Bench",
+  shared_scale = TRUE,
+  output_png   = "figures/guide_true_spatial.png",
+  ncol_panels  = 2
+) + plot_annotation(
+  title    = "True spatial contributions",
+  subtitle = "Edge-effect pattern (type 6). Values are zero-centred per bench.",
+  theme    = theme(plot.title    = element_text(size = 13, face = "bold"),
+                   plot.subtitle = element_text(size = 9, colour = "grey40"))
+)
 p_sp
-
-ggsave("figures/guide_true_spatial.png", p_sp,
-       width = 14, height = 7, dpi = 150)
 ```
 
 ## How spatial variation biases estimates
@@ -311,9 +287,7 @@ Key argument decisions:
 
 For our simulated dataset:
 
-```{r run-gam}
-if (!dir.exists("data/gam_output")) dir.create("data/gam_output", recursive = TRUE)
-
+```{r run-gam, eval=FALSE}
 out <- run_spatial_gam(
   data_file     = "data/BNI_simulation.csv",
   pheno_cols    = c("BNI"),
@@ -336,33 +310,27 @@ The function prints a progress log as it runs and returns a named list invisibly
 | `$model_summary` | data.frame of per-trait/bench fit statistics |
 
 The same information is also written to CSV files in `output_dir` (see Section 5).
+The rest of this guide walks through each step of what the function does
+internally, using the lower-level functions directly.
 
 ---
 
 # Step 4: What happens inside `run_spatial_gam()`
 
-The rest of this guide walks through what the function does at each stage, using
-the same data and column names. This is useful for understanding the model and
-for adapting the individual functions to custom workflows.
-
 ```{r setup-internals}
-# Variables used in the step-by-step sections below
-data_file     <- "data/BNI_simulation.csv"
+# Column names and paths used throughout the step-by-step sections below
 output_dir    <- "data/gam_output"
-pheno_cols    <- c("BNI")
 geno_col      <- "Genotype"
 row_col       <- "Row"
 col_col       <- "Col"
 bench_col     <- "Bench"
-estimate_type <- "BLUEs"
-k_row         <- NULL
-k_col         <- NULL
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 ```
 
 ## Load and validate the data
 
 ```{r load-validate}
-data <- read_input(data_file)
+data <- read_input("data/BNI_simulation.csv")
 
 cat("-- Data summary -----------------------------------------------------------\n")
 cat("  Rows:", nrow(data), "\n")
@@ -371,7 +339,7 @@ cat("  Benches:", paste(sort(unique(data[[bench_col]])), collapse = ", "), "\n")
 cat("  Grid (rows x cols):",
     length(unique(data[[row_col]])), "x",
     length(unique(data[[col_col]])), "\n")
-cat("  Traits:", paste(pheno_cols, collapse = ", "), "\n")
+cat("  Trait: BNI\n")
 ```
 
 ## Fit the joint multi-bench model
@@ -397,7 +365,7 @@ where:
 - `s(row_f, bench_f, bs='re')` and `s(col_f, bench_f, bs='re')`: row and
   column random effects nested within bench; absorb residual directional trends
 
-```{r fit-model}
+```{r fit-model, cache=TRUE}
 result <- fit_mgcv_joint(
   data      = data,
   pheno     = "BNI",
@@ -608,30 +576,21 @@ intensity affects the correction.
 
 ```{r compare-spatial-surfaces, fig.height=8, fig.cap="Estimated spatial trend surfaces for all four benches on a shared colour scale. The model captures both the edge-effect structure and the increasing intensity from Bench1 to Bench4."}
 data$spatial_est <- result$spatial
-sp_est_lims <- range(data$spatial_est, na.rm = TRUE)
 
-sp_est_plots <- lapply(seq_along(benches), function(i) {
-  plot_bench_heatmap(
-    bench_dfr     = data[data$Bench == benches[i], ],
-    pheno         = "spatial_est",
-    bench_label   = paste0(benches[i], "  (intensity = ",
-                           c(15, 25, 40, 60)[i], ")"),
-    shared_limits = sp_est_lims
-  )
-})
-
-p_sp_est <- wrap_plots(sp_est_plots, ncol = 2) +
-  plot_layout(guides = "collect") +
-  plot_annotation(
-    title    = "Estimated spatial trends (joint model)",
-    subtitle = "Shared colour scale. Compare to true spatial patterns above.",
-    theme    = theme(plot.title    = element_text(size = 13, face = "bold"),
-                     plot.subtitle = element_text(size = 9, colour = "grey40"))
-  )
+p_sp_est <- plot_all_bench_heatmaps(
+  dfr          = data,
+  pheno        = "spatial_est",
+  bench_col    = "Bench",
+  shared_scale = TRUE,
+  output_png   = "figures/guide_estimated_spatial.png",
+  ncol_panels  = 2
+) + plot_annotation(
+  title    = "Estimated spatial trends (joint model)",
+  subtitle = "Shared colour scale. Compare to true spatial patterns above.",
+  theme    = theme(plot.title    = element_text(size = 13, face = "bold"),
+                   plot.subtitle = element_text(size = 9, colour = "grey40"))
+)
 p_sp_est
-
-ggsave("figures/guide_estimated_spatial.png", p_sp_est,
-       width = 14, height = 7, dpi = 150)
 ```
 
 ---
