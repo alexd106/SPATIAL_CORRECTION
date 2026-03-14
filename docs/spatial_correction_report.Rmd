@@ -20,6 +20,17 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
                       fig.align = "center", out.width = "100%")
 ```
 
+```{r packages, include=FALSE}
+pkgs <- c("SpATS", "mgcv", "sommer", "ggplot2", "patchwork")
+for (pkg in pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE))
+    tryCatch(
+      install.packages(pkg, repos = "https://cloud.r-project.org"),
+      error = function(e) warning("Could not install package: ", pkg)
+    )
+}
+```
+
 ```{r fig-counter, include=FALSE}
 # Simple figure counter by section
 fig_n <- new.env(parent = emptyenv())

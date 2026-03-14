@@ -5,29 +5,37 @@ date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   html_document:
     toc: true
+    toc_depth: 4
     toc_float: true
-    toc_depth: 3
+    number_sections: true
     theme: flatly
     highlight: tango
-    code_folding: show
+    fig_width: 10
+    fig_height: 5
+    code_folding: hide
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(
-  echo    = TRUE,
-  message = FALSE,
-  warning = FALSE,
-  fig.width  = 10,
-  fig.height = 5,
-  dpi     = 150
-)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.align = "center", out.width = "100%")
+```
+
+```{r packages, include=FALSE}
+pkgs <- c("ggplot2", "patchwork")
+for (pkg in pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE))
+    tryCatch(
+      install.packages(pkg, repos = "https://cloud.r-project.org"),
+      error = function(e) warning("Could not install package: ", pkg)
+    )
+}
 ```
 
 ## Overview
 
 `simulate_spatial_data.R` provides three functions for generating and visualising
 synthetic multi-environment field trial data. The simulated data is intended
-as a test input for the spatial correction pipeline in `SpatialCorrectionFlexible.R`.
+as a test input for the spatial correction pipeline in `fit_spatial_models.R`.
 
 **Experimental design simulated:**
 
@@ -200,7 +208,7 @@ plot_all_bench_heatmaps(
   bench_col    = "Bench",
   show_labels  = FALSE,
   shared_scale = TRUE,
-  output_png   = "data/heatmap_type1_none.png"
+  output_png   = "figures/heatmap_type1_none.png"
 )
 ```
 
@@ -237,7 +245,7 @@ plot_all_bench_heatmaps(
   bench_col    = "Bench",
   show_labels  = FALSE,
   shared_scale = TRUE,
-  output_png   = "data/heatmap_type3_cols.png"
+  output_png   = "figures/heatmap_type3_cols.png"
 )
 ```
 
@@ -265,7 +273,7 @@ p_all <- plot_all_bench_heatmaps(
   ncol_panels  = 2,
   panel_width  = 7,
   panel_height = 4,
-  output_png   = "data/heatmap_type3_cols_2col.png"
+  output_png   = "figures/heatmap_type3_cols_2col.png"
 )
 p_all
 ```
@@ -284,7 +292,7 @@ p_all1 <- plot_all_bench_heatmaps(
   ncol_panels  = 1,
   panel_width  = 9,
   panel_height = 4,
-  output_png   = "data/heatmap_type3_cols_1col.png"
+  output_png   = "figures/heatmap_type3_cols_1col.png"
 )
 p_all1
 ```
@@ -452,7 +460,7 @@ With a shared colour scale, the 4-fold increase in spatial severity from Bench1 
 ### 9. Inspecting the true genotype effects
 
 `$true_effects` contains the latent genotype values used to generate the data.
-After running `SpatialCorrectionFlexible.R`, the Pearson correlation and RMSE between these true effects and the extracted BLUEs (or BLUPs) quantify how well the spatial correction has recovered the signal.
+After running `fit_spatial_models.R`, the Pearson correlation and RMSE between these true effects and the extracted BLUEs (or BLUPs) quantify how well the spatial correction has recovered the signal.
 
 ```{r true-effects, fig.height=3.5, fig.width=5}
 head(sim_cols$true_effects)
@@ -486,7 +494,7 @@ p_true <- plot_all_bench_heatmaps(
   ncol_panels  = 2,
   panel_width  = 7,
   panel_height = 4,
-  output_png   = "data/heatmap_true_effects.png"
+  output_png   = "figures/heatmap_true_effects.png"
 )
 p_true
 ```
@@ -497,8 +505,8 @@ p_true
 
 ### Output files from this document
 
-All files produced by knitting this document are written to `data/` relative
-to the document location (i.e. `docs/data/`):
+All files produced by knitting this document are written to `figures/` relative
+to the document location (i.e. `docs/figures/`):
 
 | File | Contents |
 |---|---|
@@ -536,7 +544,7 @@ p <- plot_bench_heatmap(
   bench_label = "Bench 1"
 )
 
-ggsave("data/bench1_heatmap.png", p, width = 9, height = 5, dpi = 150)
+ggsave("figures/bench1_heatmap.png", p, width = 9, height = 5, dpi = 150)
 ```
 
 ---

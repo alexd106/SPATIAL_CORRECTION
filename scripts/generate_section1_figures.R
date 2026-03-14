@@ -15,7 +15,7 @@ suppressPackageStartupMessages({
   library(patchwork)
 })
 
-source("scripts/SpatialCorrectionFlexible.R")
+source("scripts/fit_spatial_models.R")
 
 fig_dir <- "docs/figures"
 out_dir <- "output/section1"

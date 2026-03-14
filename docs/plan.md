@@ -185,7 +185,7 @@ For each trait, a method-comparison page in the diagnostic PDF:
 
 ### Phase 1: Per-bench comparison — **COMPLETE**
 
-**File**: `scripts/SpatialCorrectionFlexible.R`
+**File**: `scripts/fit_spatial_models.R`
 
 Written entirely fresh. All method-specific correction functions and all visualisation and utility functions implemented de novo in a single file.
 
@@ -275,7 +275,7 @@ Per-trait: count and values of outliers replaced by NA.
 
 ---
 
-## 9. Function Architecture (`SpatialCorrectionFlexible.R`)
+## 9. Function Architecture (`fit_spatial_models.R`)
 
 ```
 read_input(fn, rda_object)             # read CSV or .rda; return data frame
@@ -314,7 +314,7 @@ run_spatial_correction(               # main orchestration function (per-bench o
 ## 10. Usage Examples
 
 ```r
-source("scripts/SpatialCorrectionFlexible.R")
+source("scripts/fit_spatial_models.R")
 
 # Test 1: Real data (wheatdata), all methods, BLUEs
 run_spatial_correction(

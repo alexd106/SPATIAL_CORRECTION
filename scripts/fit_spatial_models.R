@@ -1,5 +1,5 @@
 # ============================================================================
-# SpatialCorrectionFlexible.R
+# fit_spatial_models.R
 # Multi-method spatial correction framework for field trial data
 #
 # Methods:
@@ -21,7 +21,7 @@
 #   outlier_report.txt        — per-trait outlier count and values
 #
 # Usage:
-#   source("scripts/SpatialCorrectionFlexible.R")
+#   source("scripts/fit_spatial_models.R")
 #   run_spatial_correction(
 #     fn         = "data/wheatdata.rda",
 #     rda_object = "wheatdata",
@@ -43,41 +43,14 @@ suppressPackageStartupMessages({
   library(patchwork)
 })
 
+# Load shared utility and mgcv fitting functions from the canonical
+# standalone script.
+source("scripts/spatial_correct_gam.R")
+
 
 # ============================================================================
 # Section 1: Utility functions
 # ============================================================================
-
-#' Read field trial data from CSV or R binary file
-#'
-#' @param fn          File path (.csv, .rda, or .RData)
-#' @param rda_object  Name of the object to extract when fn is .rda/.RData;
-#'                    if NULL, the first data frame found is returned
-#' @return data.frame
-read_input <- function(fn, rda_object = NULL) {
-  ext <- tolower(tools::file_ext(fn))
-  if (ext == "csv") {
-    return(read.csv(fn, stringsAsFactors = FALSE))
-  }
-  if (ext %in% c("rda", "rdata")) {
-    e <- new.env(parent = emptyenv())
-    load(fn, envir = e)
-    if (!is.null(rda_object)) {
-      if (!exists(rda_object, envir = e))
-        stop("Object '", rda_object, "' not found in ", fn)
-      return(as.data.frame(get(rda_object, envir = e)))
-    }
-    objs <- ls(e)
-    dfs  <- Filter(function(nm) is.data.frame(get(nm, envir = e)), objs)
-    if (length(dfs) == 0) stop("No data frames found in ", fn)
-    if (length(dfs) > 1)
-      message("Multiple data frames in ", fn, "; using '", dfs[1],
-              "'. Set rda_object to choose.")
-    return(as.data.frame(get(dfs[1], envir = e)))
-  }
-  stop("Unsupported file extension '", ext, "'. Use .csv, .rda, or .RData")
-}
-
 
 #' Replace values outside 1.5 × IQR fences with NA
 #'
@@ -97,58 +70,6 @@ replace_outliers_with_na <- function(x) {
   )
 }
 
-
-#' Choose number of B-spline segments adaptively
-#'
-#' Rule: roughly half the unique positions, bounded to [5, 20].
-#' SpATS requires nseg < number of unique positions; this bound ensures that.
-#'
-#' @param n_unique  Number of unique positions along one axis
-#' @return integer
-adaptive_nseg <- function(n_unique) {
-  as.integer(min(max(5L, floor(n_unique / 2L)), 20L))
-}
-
-
-#' Compute empirical semivariogram
-#'
-#' @param data      data.frame with row, col, and value columns
-#' @param row_col   Name of row coordinate column
-#' @param col_col   Name of column coordinate column
-#' @param value_col Name of value column
-#' @param n_bins    Number of distance bins (default 15)
-#' @return data.frame with columns dist (mean lag distance) and sv (mean semivariance),
-#'         or NULL when there are fewer than 10 complete observations
-empirical_semivariogram <- function(data, row_col, col_col, value_col, n_bins = 15) {
-  ok  <- !is.na(data[[value_col]])
-  d   <- data[ok, ]
-  n   <- nrow(d)
-  if (n < 10) return(NULL)
-
-  rows <- d[[row_col]]
-  cols <- d[[col_col]]
-  vals <- d[[value_col]]
-
-  # Pairwise distances and semivariances (upper triangle only)
-  row_diff <- outer(rows, rows, "-")
-  col_diff <- outer(cols, cols, "-")
-  dists    <- sqrt(row_diff^2 + col_diff^2)
-  sv_mat   <- (outer(vals, vals, "-"))^2 / 2
-
-  up      <- upper.tri(dists)
-  d_vec   <- dists[up]
-  sv_vec  <- sv_mat[up]
-
-  max_d   <- quantile(d_vec, 0.6)   # use up to 60% of max distance
-  keep    <- d_vec <= max_d & d_vec > 0
-  d_vec   <- d_vec[keep]
-  sv_vec  <- sv_vec[keep]
-
-  breaks  <- seq(0, max(d_vec), length.out = n_bins + 1)
-  bin     <- cut(d_vec, breaks = breaks, include.lowest = TRUE)
-  agg     <- aggregate(cbind(sv = sv_vec, dist = d_vec) ~ bin, FUN = mean)
-  agg[order(agg$dist), c("dist", "sv")]
-}
 
 
 # ============================================================================
@@ -279,6 +200,9 @@ run_SpATS_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
 #' Uses te(row, col) tensor-product smooth (anisotropic, smoothness via REML).
 #' BLUEs: 0 + Genotype as parametric fixed; BLUPs: s(Genotype, bs="re").
 #'
+#' The best-performing variant (te_ps_re) delegates to fit_mgcv_bench() from
+#' spatial_correct_gam.R. Other smoother variants are handled inline.
+#'
 #' @inheritParams run_SpATS_bench
 #' @param smoother_type One of "te_default", "te_ps", "te_ps_re", "te_highk",
 #'   "te_ad". Controls the spatial smoother basis and structure.
@@ -286,6 +210,17 @@ run_SpATS_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
 run_mgcv_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
                             output_type = "BLUEs",
                             smoother_type = "te_default") {
+
+  # te_ps_re: delegate to the canonical implementation in spatial_correct_gam.R
+  if (smoother_type == "te_ps_re") {
+    r <- fit_mgcv_bench(bench_data, pheno, gt_col, row_col, col_col,
+                        estimate_type = output_type)
+    # Normalize first column name to "Genotype" (internal convention)
+    if (!is.null(r$blues)) names(r$blues)[1] <- "Genotype"
+    if (!is.null(r$blups)) names(r$blups)[1] <- "Genotype"
+    return(r)
+  }
+
   res <- list(blues = NULL, blups = NULL, fitted = NULL,
               residuals = NULL, spatial = NULL)
 
@@ -302,8 +237,6 @@ run_mgcv_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
     te_default = paste0("te(", row_col, ", ", col_col, ")"),
     te_ps      = paste0("te(", row_col, ", ", col_col,
                         ", bs=c('ps','ps'), k=c(", nr, ",", nc, "))"),
-    te_ps_re   = paste0("te(", row_col, ", ", col_col,
-                        ", bs=c('ps','ps'), k=c(", nr, ",", nc, "))"),
     te_highk   = paste0("te(", row_col, ", ", col_col,
                         ", k=c(", nr, ",", nc, "))"),
     te_ad      = paste0("t2(", row_col, ", ", col_col,
@@ -311,17 +244,9 @@ run_mgcv_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
     stop("Unknown smoother_type: ", smoother_type)
   )
 
-  # For te_ps_re, add row/col random effects
-  re_extra <- ""
-  if (smoother_type == "te_ps_re") {
-    bench_data$row_f <- as.factor(bench_data[[row_col]])
-    bench_data$col_f <- as.factor(bench_data[[col_col]])
-    re_extra <- " + s(row_f, bs='re') + s(col_f, bs='re')"
-  }
-
   # ---- BLUEs ----------------------------------------------------------
   if (output_type %in% c("BLUEs", "both")) {
-    fm <- as.formula(paste0(pheno, " ~ 0 + ", gt_col, " + ", te_term, re_extra))
+    fm <- as.formula(paste0(pheno, " ~ 0 + ", gt_col, " + ", te_term))
     m  <- tryCatch(
       gam(fm, data = bench_data, method = "REML"),
       error = function(e) { message("mgcv BLUEs error: ", e$message); NULL }
@@ -342,7 +267,6 @@ run_mgcv_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
       if (is.null(res$fitted)) {
         res$fitted    <- as.numeric(fitted(m))
         res$residuals <- as.numeric(residuals(m))
-        # Spatial trend from the te() term only (not row/col random effects)
         terms_pred  <- predict(m, type = "terms")
         te_col      <- grep("^t[e2]\\(", colnames(terms_pred), value = TRUE)
         res$spatial <- as.numeric(terms_pred[, te_col[1]])
@@ -352,18 +276,16 @@ run_mgcv_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
 
   # ---- BLUPs ----------------------------------------------------------
   if (output_type %in% c("BLUPs", "both")) {
-    fm <- as.formula(paste0(pheno, " ~ s(", gt_col, ", bs='re') + ", te_term, re_extra))
+    fm <- as.formula(paste0(pheno, " ~ s(", gt_col, ", bs='re') + ", te_term))
     m  <- tryCatch(
       gam(fm, data = bench_data, method = "REML"),
       error = function(e) { message("mgcv BLUPs error: ", e$message); NULL }
     )
     if (!is.null(m)) {
-      # BLUPs: smooth coefficients for s(geno, bs="re") in level order
       re_pattern <- paste0("s\\(", gt_col, "\\)")
       re_idx     <- grep(re_pattern, names(coef(m)))
       blup_vals  <- coef(m)[re_idx]
 
-      # SE via prediction at mean spatial location for each genotype
       mean_row <- mean(bench_data[[row_col]], na.rm = TRUE)
       mean_col <- mean(bench_data[[col_col]], na.rm = TRUE)
       newdat   <- setNames(
@@ -371,11 +293,6 @@ run_mgcv_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
         c(gt_col, row_col, col_col)
       )
       newdat[[gt_col]] <- factor(newdat[[gt_col]], levels = geno_levels)
-      # For te_ps_re, also need row_f and col_f in newdata
-      if (smoother_type == "te_ps_re") {
-        newdat$row_f <- factor(round(mean_row), levels = levels(bench_data$row_f))
-        newdat$col_f <- factor(round(mean_col), levels = levels(bench_data$col_f))
-      }
       tp <- tryCatch(
         predict(m, newdata = newdat, type = "terms", se.fit = TRUE),
         error = function(e) NULL
@@ -386,7 +303,6 @@ run_mgcv_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
       blup_se <- if (!is.null(tp) && !is.na(re_col_name))
         as.numeric(tp$se.fit[, re_col_name]) else rep(NA_real_, n_geno)
 
-      # Intercept + random deviation = BLUP total
       intercept  <- coef(m)["(Intercept)"]
       blup_total <- as.numeric(intercept) + as.numeric(blup_vals)
 
@@ -563,11 +479,9 @@ run_sommer_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
 
 #' Joint multi-bench mgcv::gam spatial correction
 #'
-#' Fits a single GAM across all benches with:
-#'   - Genotype as fixed effect (no intercept → coefficients are BLUEs)
-#'   - Bench as parametric fixed effect
-#'   - Per-bench 2D P-spline spatial surfaces via te(..., by=bench_f)
-#'   - Row and column random effects nested within bench
+#' Delegates to fit_mgcv_joint() from spatial_correct_gam.R (the canonical
+#' implementation). Returns list(blues, fitted, residuals, spatial) with the
+#' genotype column renamed to "Genotype" for internal consistency.
 #'
 #' @param data       data.frame with all benches
 #' @param pheno      Name of the phenotype column
@@ -577,66 +491,9 @@ run_sommer_bench <- function(bench_data, pheno, gt_col, row_col, col_col,
 #' @param bench_col  Name of the bench column
 #' @return list(blues, fitted, residuals, spatial)
 run_mgcv_joint <- function(data, pheno, gt_col, row_col, col_col, bench_col) {
-  res <- list(blues = NULL, fitted = NULL, residuals = NULL, spatial = NULL)
-
-  data[[gt_col]]  <- as.factor(data[[gt_col]])
-  data$bench_f    <- as.factor(data[[bench_col]])
-  data$row_f      <- as.factor(data[[row_col]])
-  data$col_f      <- as.factor(data[[col_col]])
-  geno_levels     <- levels(data[[gt_col]])
-
-  # Adaptive k per bench (use minimum across benches for consistency)
-  bench_levels <- levels(data$bench_f)
-  nr_vec <- sapply(bench_levels, function(b) {
-    length(unique(data[[row_col]][data$bench_f == b]))
-  })
-  nc_vec <- sapply(bench_levels, function(b) {
-    length(unique(data[[col_col]][data$bench_f == b]))
-  })
-  nr <- adaptive_nseg(min(nr_vec))
-  nc <- adaptive_nseg(min(nc_vec))
-
-  # Build formula
-  fm <- as.formula(paste0(
-    pheno, " ~ 0 + ", gt_col, " + bench_f + ",
-    "te(", row_col, ", ", col_col, ", bs=c('ps','ps'), k=c(", nr, ",", nc, "), by=bench_f) + ",
-    "s(row_f, bench_f, bs='re') + s(col_f, bench_f, bs='re')"
-  ))
-
-  m <- tryCatch(
-    gam(fm, data = data, method = "REML"),
-    error = function(e) { message("mgcv joint error: ", e$message); NULL }
-  )
-
-  if (is.null(m)) return(res)
-
-  # Extract BLUEs
-  coef_names <- paste0(gt_col, geno_levels)
-  blues_vals <- coef(m)[coef_names]
-  vcov_diag  <- diag(vcov(m))
-  blues_se   <- sqrt(vcov_diag[coef_names])
-
-  res$blues <- data.frame(
-    Genotype = geno_levels,
-    BLUE     = as.numeric(blues_vals),
-    BLUE_SE  = as.numeric(blues_se),
-    stringsAsFactors = FALSE
-  )
-
-  # Fitted values and residuals
-  res$fitted    <- as.numeric(fitted(m))
-  res$residuals <- as.numeric(residuals(m))
-
-  # Spatial trend: sum of all te() columns from predict(type="terms")
-  terms_pred <- predict(m, type = "terms")
-  te_cols    <- grep("^te\\(", colnames(terms_pred), value = TRUE)
-  if (length(te_cols) > 0) {
-    res$spatial <- as.numeric(rowSums(terms_pred[, te_cols, drop = FALSE]))
-  } else {
-    res$spatial <- rep(0, nrow(data))
-  }
-
-  res
+  r <- fit_mgcv_joint(data, pheno, gt_col, row_col, col_col, bench_col)
+  if (!is.null(r$blues)) names(r$blues)[1] <- "Genotype"
+  r
 }
 
 
@@ -773,73 +630,8 @@ run_sommer_joint <- function(data, pheno, gt_col, row_col, col_col, bench_col) {
 # ============================================================================
 # Section 3: Visualisation functions
 # ============================================================================
-
-#' Plot a field heatmap for one bench
-#'
-#' @param data      data.frame with coordinates and a value column
-#' @param row_col   Name of row coordinate column
-#' @param col_col   Name of column coordinate column
-#' @param value_col Name of the column to display as fill
-#' @param title     Plot title
-#' @param limits    Numeric c(min, max) for fill scale; NULL = auto
-#' @return ggplot object
-plot_heatmap <- function(data, row_col, col_col, value_col,
-                          title = "", limits = NULL) {
-  ok_rows <- !is.na(data[[row_col]]) & !is.na(data[[col_col]])
-  d       <- data[ok_rows, ]
-  if (is.null(limits)) limits <- range(d[[value_col]], na.rm = TRUE)
-
-  ggplot(d, aes(x = .data[[col_col]], y = .data[[row_col]],
-                fill = .data[[value_col]])) +
-    geom_tile(colour = "white", linewidth = 0.2) +
-    scale_fill_viridis_c(
-      name   = value_col,
-      limits = limits,
-      option = "viridis",
-      na.value = "grey70"
-    ) +
-    scale_y_reverse(breaks = sort(unique(d[[row_col]]))) +
-    scale_x_continuous(breaks = sort(unique(d[[col_col]]))) +
-    labs(title = title, x = col_col, y = row_col) +
-    theme_bw(base_size = 8) +
-    theme(
-      plot.title   = element_text(size = 9, face = "bold", hjust = 0.5),
-      panel.grid   = element_blank(),
-      axis.text    = element_text(size = 6),
-      legend.title = element_text(size = 7),
-      legend.text  = element_text(size = 6)
-    )
-}
-
-
-#' Plot empirical semivariogram
-#'
-#' @param vgram  data.frame from empirical_semivariogram() with columns dist, sv
-#' @param title  Plot title
-#' @return ggplot object, or a blank placeholder if vgram is NULL
-plot_variogram <- function(vgram, title = "") {
-  if (is.null(vgram) || nrow(vgram) == 0) {
-    return(
-      ggplot() +
-        annotate("text", x = 0.5, y = 0.5, label = "Insufficient data",
-                 size = 3, colour = "grey50") +
-        theme_void() +
-        labs(title = title) +
-        theme(plot.title = element_text(size = 9, face = "bold", hjust = 0.5))
-    )
-  }
-
-  ggplot(vgram, aes(x = dist, y = sv)) +
-    geom_point(colour = "#2c7bb6", size = 1.5) +
-    geom_line(colour = "#2c7bb6", linewidth = 0.5) +
-    labs(title = title, x = "Distance (plot units)", y = "Semivariance") +
-    theme_bw(base_size = 8) +
-    theme(
-      plot.title = element_text(size = 9, face = "bold", hjust = 0.5),
-      axis.title = element_text(size = 7),
-      axis.text  = element_text(size = 6)
-    )
-}
+# plot_heatmap(), plot_variogram(), and empirical_semivariogram() are defined
+# in spatial_correct_gam.R (sourced above).
 
 
 #' Compose 6-panel diagnostic page for one bench × trait × method

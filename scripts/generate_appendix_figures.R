@@ -20,7 +20,7 @@ suppressPackageStartupMessages({
 })
 
 source("scripts/simulate_spatial_data.R")
-source("scripts/SpatialCorrectionFlexible.R")
+source("scripts/fit_spatial_models.R")
 
 fig_dir <- "docs/figures"
 out_dir <- "output/appendix"

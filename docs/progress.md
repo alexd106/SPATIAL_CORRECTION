@@ -1,16 +1,16 @@
 # Progress Summary: Flexible Multi-Bench Spatial Correction Framework
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-03-14_
 
 ---
 
-## Status: Phase 2 — Report and guide complete; all spatial types centred; SpATS scale fix applied
+## Status: Phase 2 complete — `spatial_correct_gam.R` functionalised; guide updated; file structure documented
 
 ---
 
 ## What Was Built
 
-### `scripts/SpatialCorrectionFlexible.R` (~1010 lines)
+### `scripts/fit_spatial_models.R` (~1010 lines)
 
 A single self-contained R script implementing a flexible, multi-method spatial correction framework for field trial data. Written entirely fresh — does not source or depend on the original `SpatialCorrectionSpATS.R`.
 
@@ -138,9 +138,12 @@ SpATS's PSANOVA decomposition constrains each component (row, column, interactio
 
 ## File Structure
 
+See `docs/file_structure.md` for the full annotated directory tree.
+
 ```
 scripts/
-  SpatialCorrectionFlexible.R       — main framework
+  spatial_correct_gam.R             — standalone mgcv pipeline; run_spatial_gam() entry point
+  fit_spatial_models.R              — multi-method framework (SpATS, mgcv, sommer); sources spatial_correct_gam.R
   simulate_spatial_data.R           — simulation (types 1-7, all centred)
   generate_section1_figures.R       — Part 1 figures/data
   generate_section2_figures.R       — Part 2 figures/data
@@ -149,18 +152,75 @@ scripts/
 docs/
   spatial_correction_report.Rmd     — main report
   spatial_correction_report.html
+  spatial_correct_gam_guide.Rmd     — step-by-step guide for run_spatial_gam()
+  spatial_correct_gam_guide.html
   simulate_spatial_data_guide.Rmd   — usage guide for simulate_spatial_data.R
   simulate_spatial_data_guide.html
+  file_structure.md                 — annotated directory/file tree (this project)
   figures/
     s1_*.png                        — Part 1 figures
     s2_*.png                        — Part 2 figures
     sa_*.png                        — Appendix figures
+    heatmap_*.png                   — simulate_spatial_data_guide.Rmd figures
+    guide_*.png                     — spatial_correct_gam_guide.Rmd figures
+  data/
+    BNI_simulation.csv              — simulated 4-bench BNI trial (guide input)
+    BNI_true_effects.csv            — true genotype effects (guide validation)
+    gam_output/                     — CSVs from run_spatial_gam() during guide
 
 output/
+  gam/                              — run_spatial_gam() output on wheatdata (single-bench)
   section1/                         — wheatdata BLUEs, mgcv variant summary
   section2/                         — comparison_summary.csv, residual_summary.csv
   appendix/                         — appendix_summary.csv
 ```
+
+## Changes: 2026-03-14 (functionalisation and guide update)
+
+### `spatial_correct_gam.R` refactored
+
+- Removed the `USER CONFIGURATION` block (hardcoded variables at the top of the script).
+- Removed the `options(spatial_gam_source_only)` guard pattern.
+- All execution logic (data loading, validation, model fitting, CSV output, plots) wrapped
+  into a single `run_spatial_gam()` function with named arguments and sensible defaults:
+  - `output_dir = "output/gam"`, `geno_col = "geno"`, `row_col = "row"`, `col_col = "col"`,
+    `bench_col = NULL`, `estimate_type = "BLUEs"`, `k_row = NULL`, `k_col = NULL`.
+  - `data_file` and `pheno_cols` are required (no defaults).
+- Function returns `invisible(list(blues, blups, spatial_trends, model_summary))`.
+- Helper and fitting functions (`read_input()`, `adaptive_nseg()`, `fit_mgcv_bench()`,
+  `fit_mgcv_joint()`, etc.) unchanged; still defined at script level.
+
+### `fit_spatial_models.R` updated
+
+- Removed the three-line guard-sourcing block (`options(spatial_gam_source_only = TRUE)` etc.).
+- Replaced with a single `source("scripts/spatial_correct_gam.R")`. The guard is no longer
+  needed because `spatial_correct_gam.R` no longer executes any top-level code on sourcing.
+
+### `spatial_correct_gam_guide.Rmd` updated
+
+- Sourcing simplified: single `source("../scripts/spatial_correct_gam.R")` (no guard options).
+- `run_spatial_gam()` added to the functions table and given a full function reference section.
+- Step 3 rewritten to document the `run_spatial_gam()` API (argument table + call example)
+  instead of describing the old configuration block.
+- Steps 4-9 preserved as a pedagogical walkthrough of what happens inside the function,
+  using a `setup-internals` chunk to set local variables for the step-by-step sections.
+- "Running the standalone script" section replaced with "Using `run_spatial_gam()` in practice".
+- All em dashes removed throughout; replaced with commas, colons, or hyphens as appropriate.
+
+### New file: `docs/file_structure.md`
+
+- Annotated directory tree covering all scripts, docs, data, and output files.
+- Includes a "Key relationships" section explaining how the scripts depend on each other.
+
+---
+
+## Rmd Conventions (as of 2026-03-14)
+
+Both Rmd files share the same YAML/setup structure:
+- `toc_depth: 4`, `number_sections: true`, `code_folding: hide`
+- Figure dimensions in YAML (`fig_width`, `fig_height`), not in the setup chunk
+- Setup chunk: `echo = FALSE`, `fig.align = "center"`, `out.width = "100%"`
+- `packages` chunk after setup: uses `requireNamespace()` + `tryCatch(install.packages(..., repos="https://cloud.r-project.org"))` — checks/installs silently without halting on failure
 
 ---
 
