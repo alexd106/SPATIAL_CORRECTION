@@ -1,5 +1,9 @@
 # Progress Summary: Flexible Multi-Bench Spatial Correction Framework
 
+> Legacy progress log. The canonical planning/status document is now
+> [roadmap.md](/home/alexd106/Repos/SPATIAL_CORRECTION/docs/roadmap.md).
+> Keep this file as historical record.
+
 _Last updated: 2026-03-14_
 
 ---

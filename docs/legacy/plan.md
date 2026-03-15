@@ -1,5 +1,9 @@
 # Plan: Flexible Multi-Bench Spatial Correction Framework
 
+> Legacy detailed planning document. The canonical high-level planning/status
+> document is now [roadmap.md](/home/alexd106/Repos/SPATIAL_CORRECTION/docs/roadmap.md).
+> Keep this file for detailed modelling notes and implementation sketches.
+
 ---
 
 ## 1. Problem Statement
@@ -238,7 +242,489 @@ Written entirely fresh. All method-specific correction functions and all visuali
 
 ---
 
-## 8. Output Specification
+## 8. Genotype-by-Environment (GxE) Extension Plan
+
+### 8.1 Motivation
+
+The current joint models assume that each genotype has a single common effect
+across all benches:
+
+$$y_{ijrc} = \mu + g_i + e_j + \xi_j(r, c) + \varepsilon_{ijrc}$$
+
+where $g_i$ is constant across environments (benches). This is a strong
+assumption. In real trials, genotypes often respond differently across benches
+or environments because of microclimate differences, management variation, or
+true biological interaction.
+
+If GxE is present but omitted, the current joint BLUE model may:
+
+- overstate certainty in genotype means,
+- bias average genotype estimates when responses are not parallel across benches,
+- attribute some genotype-specific environment response to the spatial term or
+  residual noise,
+- mis-rank unstable genotypes that perform inconsistently across benches.
+
+The next methodological extension should therefore quantify and model
+genotype-by-environment interaction explicitly.
+
+### 8.2 Proposed model extension
+
+The recommended first implementation is to add a **random GxE deviation term**
+to the current joint `mgcv` model:
+
+$$y_{ijrc} = \mu + g_i + e_j + (ge)_{ij} + \xi_j(r, c) + \rho_{r(j)} + \kappa_{c(j)} + \varepsilon_{ijrc}$$
+
+with
+
+$$ (ge)_{ij} \sim N(0, \sigma^2_{ge}) $$
+
+where:
+
+- $g_i$ is the genotype main effect,
+- $e_j$ is the fixed bench/environment effect,
+- $(ge)_{ij}$ is the genotype-specific deviation within bench $j$,
+- $\xi_j(r, c)$ is the bench-specific 2D spatial surface,
+- $\rho_{r(j)}$ and $\kappa_{c(j)}$ are row and column random effects nested
+  within bench,
+- $\varepsilon_{ijrc} \sim N(0, \sigma^2_e)$ is the residual.
+
+This preserves the current interpretation of genotype BLUEs as average genotype
+performance across benches, while allowing bench-specific deviations around that
+average.
+
+### 8.3 Recommended `mgcv` implementation
+
+Extend the current `run_mgcv_joint()` model by adding:
+
+```r
+s(Genotype, bench_f, bs = "re")
+```
+
+to the existing formula:
+
+```r
+pheno ~ 0 + Genotype + bench_f +
+  te(Row, Col, by = bench_f, bs = c("ps", "ps")) +
+  s(row_f, bench_f, bs = "re") +
+  s(col_f, bench_f, bs = "re") +
+  s(Genotype, bench_f, bs = "re")
+```
+
+Interpretation:
+
+- `0 + Genotype` retains fixed genotype effects, i.e. average BLUEs across benches
+- `bench_f` estimates mean bench differences
+- `te(..., by = bench_f)` keeps an independent spatial surface per bench
+- `s(row_f, bench_f, bs = "re")` and `s(col_f, bench_f, bs = "re")` retain
+  the row/column random effects already shown to improve fit
+- `s(Genotype, bench_f, bs = "re")` captures GxE as a penalised random
+  genotype-by-bench deviation
+
+This should be the first implementation because it is simple, regularised, and
+compatible with the current `mgcv` framework.
+
+### 8.4 Quantities to estimate and report
+
+The GxE extension should return and document the following quantities:
+
+1. **GxE variance component**
+   - Estimate the variance associated with `s(Genotype, bench_f, bs = "re")`
+   - Compare it with genotype main-effect variance (when applicable) and
+     residual variance
+
+2. **Per-genotype instability**
+   - Extract the bench-specific random deviations for each genotype
+   - Summarise instability as the SD or RMS of genotype-specific deviations
+     across benches
+
+3. **Change in genotype ranking**
+   - Compare genotype rankings from:
+     - joint model without GxE
+     - joint model with GxE
+   - Flag genotypes whose ranks or estimated means change materially
+
+4. **Improvement in model fit**
+   - Compare REML score, AIC, residual SD, and residual spatial structure
+     between the no-GxE and GxE models
+
+5. **Bench-specific adjusted predictions**
+   - Optionally return genotype-by-bench adjusted predictions in addition to the
+     across-bench BLUEs
+
+### 8.5 Simulation extension
+
+The simulation framework should be extended so genotype effects are decomposed
+into:
+
+$$g_{ij} = g_i + (ge)_{ij}$$
+
+where $(ge)_{ij} \sim N(0, \sigma^2_{ge})$.
+
+Implementation sketch in `simulate_spatial_data.R`:
+
+```r
+ge_dev <- matrix(rnorm(n_geno * n_bench, 0, sd_ge),
+                 nrow = n_geno, ncol = n_bench)
+```
+
+and for each bench $j$:
+
+```r
+phenotype = geno_true[i] + ge_dev[i, j] + spatial_effect + error
+```
+
+Add a user-facing argument such as:
+
+- `sd_ge = 0` by default
+- `sd_ge > 0` to introduce controllable GxE magnitude
+
+Validation scenarios should include:
+
+- `sd_ge = 0` to confirm the GxE model does not overfit badly when no
+  interaction exists
+- small GxE
+- moderate GxE
+- strong GxE
+
+### 8.6 Development plan
+
+#### Step 1: Extend `run_mgcv_joint()`
+
+- Add argument `allow_gxe = FALSE/TRUE`
+- When `TRUE`, append `s(Genotype, bench_f, bs = "re")` to the formula
+- Return a `gxe_summary` object containing:
+  - estimated smoothing parameter / variance proxy,
+  - per-genotype instability summaries,
+  - optional genotype-by-bench adjusted deviations
+
+#### Step 2: Extend the simulation script
+
+- Add argument `sd_ge`
+- Simulate genotype-specific bench deviations
+- Save true GxE values alongside the existing true genotype and true spatial
+  outputs
+
+#### Step 3: Add validation experiments
+
+- Fit joint models with and without GxE across a grid of `sd_ge` values
+- Evaluate:
+  - recovery of average genotype effects,
+  - recovery of genotype instability,
+  - change in RMSE and correlation with truth,
+  - residual spatial diagnostics
+
+#### Step 4: Add report documentation
+
+- Add a new report subsection describing:
+  - when GxE is necessary,
+  - how the model was extended,
+  - how much variance is attributable to GxE,
+  - which genotypes are stable vs unstable
+
+#### Step 5: Optional `sommer` implementation
+
+- After `mgcv` GxE is validated, extend `run_sommer_joint()` with an analogous
+  genotype-by-bench random term
+- Compare whether `sommer` and `mgcv` give consistent conclusions about GxE
+
+### 8.7 Caveats
+
+- With one observation per genotype per bench, the GxE term must remain
+  regularised; an overly rich interaction structure will compete with the
+  spatial surface and residual term for the same information.
+- The first implementation should therefore keep GxE random, not fixed.
+- If GxE is large, the interpretation of a single across-bench genotype BLUE
+  becomes less biologically meaningful; bench-specific adjusted estimates should
+  then be reported alongside the average effect.
+- Real-data validation is essential: simulation alone is not enough to establish
+  that the added term is identifying biological interaction rather than
+  absorbing residual structure.
+
+---
+
+## 9. Outlier Handling Plan
+
+### 9.1 Motivation
+
+The current framework includes optional outlier replacement via a global
+1.5 × IQR rule. This is easy to implement, but it is not the most defensible
+approach for spatially heterogeneous multi-bench trials.
+
+Outliers in this setting can arise from several qualitatively different sources:
+
+- **Measurement or data-entry errors**: impossible values, unit errors,
+  transcription mistakes
+- **Local experimental failures**: empty pots, irrigation failures, disease,
+  broken plants
+- **Legitimate biological extremes**: genuinely high- or low-performing plots
+- **Spatially structured extremes**: values that appear extreme only because the
+  underlying spatial model is incomplete
+
+These cases should not all be treated identically. In particular, a pooled
+distribution-based rule can incorrectly flag valid observations from benches with
+stronger spatial effects or different mean/variance structure.
+
+### 9.2 Statistical principles
+
+The outlier strategy should follow these principles:
+
+1. **Do not detect outliers from raw pooled phenotypes alone**
+   - pooled thresholds ignore bench effects and spatial structure
+   - they are especially inappropriate when benches differ in intensity
+
+2. **Prefer model-aware residual diagnostics over raw-value thresholds**
+   - outliers should be defined relative to the fitted spatial model, not only
+     relative to the marginal phenotype distribution
+
+3. **Use robust rules for flagging, not automatic deletion by default**
+   - plots should usually be flagged first, then optionally excluded
+
+4. **Separate hard errors from statistical anomalies**
+   - impossible values can be removed deterministically
+   - statistical outliers should be reviewed or handled by a configurable rule
+
+5. **Operate at the correct level**
+   - detection should be at least bench-specific
+   - ideally bench × trait-specific, after fitting the spatial model
+
+### 9.3 Recommended detection hierarchy
+
+The most practical and statistically defensible workflow is a three-tier system.
+
+#### Tier 1: deterministic validation checks
+
+Apply these before any model fitting:
+
+- missing genotype, row, column, or bench identifiers
+- duplicated plot coordinates within bench
+- impossible phenotype values where domain bounds are known
+  - e.g. negative yields, BNI outside 0-100 if that scale is fixed
+- non-numeric or malformed coordinates
+
+These are not “statistical outliers”; they are data-quality failures and should
+be reported separately.
+
+#### Tier 2: bench-specific robust raw screening
+
+Before model fitting, optionally flag extreme values within each bench × trait
+using a robust rule such as:
+
+- median absolute deviation (MAD), preferred
+- or IQR, if a simpler fallback is needed
+
+Recommended rule:
+
+$$ z^\ast_i = \frac{x_i - \text{median}(x)}{1.4826 \cdot \text{MAD}(x)} $$
+
+and flag if:
+
+$$ |z^\ast_i| > 3.5 $$
+
+Why this is preferred:
+
+- more robust than SD-based z-scores
+- less distorted by a few extreme values
+- easy to explain and implement
+- bench-specific, so it respects between-bench heterogeneity
+
+This stage should produce **flags**, not immediate removal, unless the user
+explicitly requests pre-fit exclusion.
+
+#### Tier 3: model-based residual outlier detection
+
+After fitting the spatial model, compute residual diagnostics within bench:
+
+- raw residuals
+- standardized residuals, if available
+- studentized residuals, if feasible
+
+Recommended practical rule for the first implementation:
+
+- fit the preferred spatial model
+- compute residuals within each bench × trait
+- flag observations with
+  - `|residual| > 3 × residual_SD_within_bench`, or preferably
+  - `|robust_residual_z| > 3.5` using MAD on residuals
+
+This is the most statistically meaningful detection layer because it asks:
+
+"Is this plot extreme after accounting for genotype, bench, and spatial trend?"
+
+That is the right question for this project.
+
+### 9.4 Recommended default policy
+
+The recommended default behaviour is:
+
+- **always** run deterministic validation checks
+- **optionally** run bench-specific raw screening
+- **prefer** model-based residual flagging as the main statistical outlier method
+- **do not automatically replace flagged values with `NA` by default**
+
+Default user-facing policy:
+
+- `outlier_method = "none"` by default for exclusion
+- `flag_outliers = TRUE` by default for reporting
+
+This keeps the workflow conservative and reproducible. Users can then choose one
+of:
+
+- report only
+- exclude pre-fit raw outliers
+- refit after excluding model-based residual outliers
+
+### 9.5 Methods to support
+
+Recommended methods to implement, in order:
+
+1. **`"none"`**
+   - no statistical outlier detection
+   - still run validation checks
+
+2. **`"mad_raw"`**
+   - bench × trait MAD rule on raw phenotypes
+   - good pragmatic baseline
+
+3. **`"iqr_raw"`**
+   - bench × trait IQR rule on raw phenotypes
+   - keep for backward compatibility, but not preferred
+
+4. **`"mad_resid"`**
+   - MAD rule on model residuals within bench × trait
+   - recommended default statistical method once implemented
+
+5. **`"sd_resid"`**
+   - residual SD rule within bench × trait
+   - less robust than MAD, but easy to communicate
+
+The long-run preferred default should be:
+
+- `outlier_method = "mad_resid"`
+
+but only after the implementation supports safe two-stage fitting and clear
+reporting.
+
+### 9.6 Implementation sketch
+
+Add an explicit outlier subsystem rather than embedding the logic inside one
+small helper.
+
+Recommended helper functions:
+
+```r
+validate_trial_data()
+flag_outliers_raw()
+flag_outliers_residual()
+apply_outlier_policy()
+summarise_outliers()
+```
+
+Suggested behaviour:
+
+- `validate_trial_data()`
+  - detect impossible values, duplicate coordinates, malformed inputs
+
+- `flag_outliers_raw(data, method = "mad_raw", by = c("bench", "trait"))`
+  - return the original data plus columns such as:
+    - `outlier_raw_flag`
+    - `outlier_raw_score`
+    - `outlier_raw_method`
+
+- `flag_outliers_residual(data, residual_col, method = "mad_resid", by = c("bench", "trait"))`
+  - return:
+    - `outlier_resid_flag`
+    - `outlier_resid_score`
+    - `outlier_resid_method`
+
+- `apply_outlier_policy(data, policy = "report")`
+  - `"report"`: keep all rows, only annotate
+  - `"set_na"`: set flagged phenotype values to `NA`
+  - `"drop"`: remove flagged rows before refit
+
+- `summarise_outliers()`
+  - generate per-trait and per-bench counts for the output report
+
+### 9.7 Integration into the current workflow
+
+#### `run_spatial_correction()`
+
+Replace the current boolean `outlier_iqr = TRUE/FALSE` with a more explicit API,
+for example:
+
+```r
+outlier_method = "none"
+outlier_policy = "report"
+outlier_threshold = 3.5
+outlier_scope = "bench"
+```
+
+Recommended staged workflow:
+
+1. validate input data
+2. run optional raw outlier flagging
+3. fit model on full data unless policy says otherwise
+4. run residual outlier flagging
+5. if requested, refit after exclusion
+6. write both the final outputs and an outlier report
+
+#### `run_spatial_gam()`
+
+Add the same interface, but keep the first version simpler:
+
+- support validation checks
+- support `mad_raw` and `mad_resid`
+- default to reporting only
+
+This keeps the user-facing standalone script aligned with the broader framework.
+
+### 9.8 Output requirements
+
+Replace the current plain-text outlier report with a richer output set:
+
+- `outlier_report.csv`
+  - one row per flagged plot
+  - includes bench, genotype, coordinates, trait, observed value, score, method,
+    and action taken
+
+- `outlier_summary.csv`
+  - counts by trait, bench, and method
+
+- optional appendix page in diagnostics PDF
+  - heatmap of flagged plots
+  - residual distribution before/after exclusion
+
+This is preferable to a free-text report because it is auditable and easier to
+reuse downstream.
+
+### 9.9 Recommended first implementation
+
+The most sensible first implementation is:
+
+1. keep deterministic validation checks always on
+2. deprecate global pooled IQR filtering
+3. add bench-specific `mad_raw` flagging
+4. add bench-specific `mad_resid` flagging after model fit
+5. default to `policy = "report"` rather than automatic removal
+
+This is a good balance between:
+
+- statistical defensibility
+- implementation complexity
+- transparency for users
+
+### 9.10 Caveats
+
+- In unreplicated designs, an extreme residual may reflect a true genotype
+  effect, a local environmental failure, or model misspecification; it should
+  not automatically be treated as error.
+- Residual-based outlier detection is only as good as the fitted model; if the
+  spatial model is poor, the residual outlier flags may be misleading.
+- Any exclusion rule should be logged explicitly so that downstream analyses are
+  reproducible and auditable.
+
+---
+
+## 10. Output Specification
 
 ### `spatial_diagnostics.pdf`
 
@@ -275,7 +761,7 @@ Per-trait: count and values of outliers replaced by NA.
 
 ---
 
-## 9. Function Architecture (`fit_spatial_models.R`)
+## 11. Function Architecture (`fit_spatial_models.R`)
 
 ```
 read_input(fn, rda_object)             # read CSV or .rda; return data frame
@@ -311,7 +797,7 @@ run_spatial_correction(               # main orchestration function (per-bench o
 
 ---
 
-## 10. Usage Examples
+## 12. Usage Examples
 
 ```r
 source("scripts/fit_spatial_models.R")
