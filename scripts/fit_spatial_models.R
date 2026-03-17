@@ -912,6 +912,11 @@ run_spatial_correction <- function(fn,
       bench_data <- bench_data_full
       bench_data[[tr]] <- as.numeric(bench_data[[tr]])
 
+      # Track which rows have valid phenotype values so model outputs
+      # (which exclude NA rows) can be written back to the correct positions
+      complete_mask <- !is.na(bench_data[[tr]])
+      bench_data_complete <- bench_data[complete_mask, , drop = FALSE]
+
       results_this <- list()
 
       # ---- Run each method ------------------------------------------
@@ -942,7 +947,7 @@ run_spatial_correction <- function(fn,
           list(smoother_type = smoother_arg) else list()
 
         r <- tryCatch(
-          do.call(run_fn, c(list(bench_data, pheno = tr, gt_col = gt_col,
+          do.call(run_fn, c(list(bench_data_complete, pheno = tr, gt_col = gt_col,
                                  row_col = row_col, col_col = col_col,
                                  output_type = output_type), extra_args)),
           error = function(e) {
@@ -958,7 +963,7 @@ run_spatial_correction <- function(fn,
         # Print diagnostic page for this method
         if (!is.null(r$fitted)) {
           p <- tryCatch(
-            plot_diagnostics(bench_data, r, pheno = tr, method = mn,
+            plot_diagnostics(bench_data_complete, r, pheno = tr, method = mn,
                              row_col = row_col, col_col = col_col,
                              bench_label = bench_label),
             error = function(e) { message("  plot_diagnostics error: ", e$message); NULL }
@@ -970,7 +975,7 @@ run_spatial_correction <- function(fn,
       # ---- Comparison page when running multiple methods --------------
       if (method %in% c("all", "all_mgcv") && length(results_this) > 1) {
         cp <- tryCatch(
-          plot_comparison(bench_data, results_this, pheno = tr,
+          plot_comparison(bench_data_complete, results_this, pheno = tr,
                           row_col = row_col, col_col = col_col,
                           bench_label = bench_label),
           error = function(e) { message("  plot_comparison error: ", e$message); NULL }
@@ -1021,22 +1026,24 @@ run_spatial_correction <- function(fn,
         mn_primary <- names(primary)[1]
         r_primary  <- primary[[mn_primary]]
         row_idx    <- which(dfr[[bench_col_use]] == bn)
+        # Model outputs exclude NA rows; write back only to complete rows
+        complete_idx <- row_idx[complete_mask]
 
         multi <- method %in% c("all", "all_mgcv")
         suffix <- if (multi) paste0("_", mn_primary) else ""
-        fitted_out[row_idx, paste0(tr, "_Observed")]                  <- bench_data_full[[tr]]
-        fitted_out[row_idx, paste0(tr, "_Fitted",       suffix)]      <- r_primary$fitted
-        fitted_out[row_idx, paste0(tr, "_Residual",     suffix)]      <- r_primary$residuals
-        fitted_out[row_idx, paste0(tr, "_SpatialTrend", suffix)]      <- r_primary$spatial
+        fitted_out[row_idx,    paste0(tr, "_Observed")]               <- bench_data_full[[tr]]
+        fitted_out[complete_idx, paste0(tr, "_Fitted",       suffix)] <- r_primary$fitted
+        fitted_out[complete_idx, paste0(tr, "_Residual",     suffix)] <- r_primary$residuals
+        fitted_out[complete_idx, paste0(tr, "_SpatialTrend", suffix)] <- r_primary$spatial
 
         # If running multiple methods, also add other methods' fitted values
         if (multi) {
           for (mn in methods_to_run[-1]) {
             r2 <- results_this[[mn]]
             if (!is.null(r2$fitted)) {
-              fitted_out[row_idx, paste0(tr, "_Fitted_",       mn)] <- r2$fitted
-              fitted_out[row_idx, paste0(tr, "_Residual_",     mn)] <- r2$residuals
-              fitted_out[row_idx, paste0(tr, "_SpatialTrend_", mn)] <- r2$spatial
+              fitted_out[complete_idx, paste0(tr, "_Fitted_",       mn)] <- r2$fitted
+              fitted_out[complete_idx, paste0(tr, "_Residual_",     mn)] <- r2$residuals
+              fitted_out[complete_idx, paste0(tr, "_SpatialTrend_", mn)] <- r2$spatial
             }
           }
         }
