@@ -1,6 +1,6 @@
 # Issues
 
-_Last reviewed: 2026-03-15_
+_Last reviewed: 2026-03-17_
 
 ---
 
@@ -40,20 +40,14 @@ computed from the full model throughout.
 
 ## Medium Priority
 
-### 3. Multi-bench API advertises BLUP support that is not implemented
+### ~~3. Multi-bench API advertises BLUP support that is not implemented~~
 
-Summary:
+**Status: Fixed**
 
-The public API for `run_spatial_gam()` advertises `"BLUEs"`, `"BLUPs"`, and
-`"both"` for `estimate_type`, but the joint multi-bench `mgcv` path supports
-only BLUEs.
-
-References:
-
-- [spatial_correct_gam.R#L415](scripts/spatial_correct_gam.R#L415)
-- [spatial_correct_gam.R#L500](scripts/spatial_correct_gam.R#L500)
-- [spatial_correct_gam_guide.Rmd#L282](docs/spatial_correct_gam_guide.Rmd#L282)
-- [spatial_correct_gam_guide.Rmd#L718](docs/spatial_correct_gam_guide.Rmd#L718)
+`run_spatial_gam()` now `stop()`s with an informative error when `estimate_type`
+is `"BLUPs"` or `"both"` with a multi-bench run (`bench_col` non-NULL). The
+unused `estimate_type` parameter was removed from `fit_mgcv_joint()`, and both
+argument tables in the guide note the single-bench requirement for BLUPs.
 
 ### ~~4. Outlier detection is global by trait rather than bench-specific~~
 

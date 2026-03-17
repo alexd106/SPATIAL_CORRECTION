@@ -484,11 +484,9 @@ fit_mgcv_bench <- function(bench_data, pheno, geno_col, row_col, col_col,
 #' @param bench_col     Bench column name
 #' @param k_row         Basis dimension for rows (NULL = auto)
 #' @param k_col         Basis dimension for columns (NULL = auto)
-#' @param estimate_type Currently only "BLUEs" (multi-bench BLUPs not implemented)
 #' @return list(blues, fitted, residuals, spatial, converged, edf_spatial)
 fit_mgcv_joint <- function(data, pheno, geno_col, row_col, col_col, bench_col,
-                            k_row = NULL, k_col = NULL,
-                            estimate_type = "BLUEs") {
+                            k_row = NULL, k_col = NULL) {
   res <- list(blues = NULL, fitted = NULL, residuals = NULL,
               spatial_smooth = NULL, spatial_total = NULL,
               row_re = NULL, col_re = NULL,
@@ -587,7 +585,8 @@ fit_mgcv_joint <- function(data, pheno, geno_col, row_col, col_col, bench_col,
 #' @param row_col       Row coordinate column name (numeric)
 #' @param col_col       Column coordinate column name (numeric)
 #' @param bench_col     Bench/trial column name; NULL triggers single-bench model
-#' @param estimate_type One of "BLUEs" (default), "BLUPs", or "both"
+#' @param estimate_type One of "BLUEs" (default), "BLUPs", or "both".
+#'   BLUPs and "both" require single-bench mode (bench_col = NULL).
 #' @param k_row         Basis dimension for row axis; NULL = auto
 #' @param k_col         Basis dimension for column axis; NULL = auto
 #' @param rda_object    Object name to extract from .rda file; NULL = first data frame
@@ -660,6 +659,13 @@ run_spatial_gam <- function(
   cat("  Grid:", n_unique_row, "rows x", n_unique_col, "cols\n")
   cat("  Traits:", paste(pheno_cols, collapse = ", "), "\n")
   cat("  Estimate type:", estimate_type, "\n")
+
+  if (!is.null(bench_col) && estimate_type %in% c("BLUPs", "both")) {
+    stop("Multi-bench BLUPs are not yet supported. ",
+         "Use estimate_type = \"BLUEs\" with bench_col, ",
+         "or use single-bench mode (bench_col = NULL) for BLUPs.",
+         call. = FALSE)
+  }
 
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE)
@@ -751,15 +757,14 @@ run_spatial_gam <- function(
     } else {
       # Multi-bench path
       result <- fit_mgcv_joint(
-        data          = data,
-        pheno         = pheno,
-        geno_col      = geno_col,
-        row_col       = row_col,
-        col_col       = col_col,
-        bench_col     = bench_col,
-        k_row         = k_row,
-        k_col         = k_col,
-        estimate_type = estimate_type
+        data      = data,
+        pheno     = pheno,
+        geno_col  = geno_col,
+        row_col   = row_col,
+        col_col   = col_col,
+        bench_col = bench_col,
+        k_row     = k_row,
+        k_col     = k_col
       )
 
       if (!is.null(result$blues)) {

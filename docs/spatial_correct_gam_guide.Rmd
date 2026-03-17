@@ -279,7 +279,7 @@ Key argument decisions:
 | `geno_col` | `"geno"` | Genotype identifier column |
 | `row_col` / `col_col` | `"row"` / `"col"` | Numeric row/column coordinates; no NAs allowed |
 | `bench_col` | `NULL` | Bench/trial identifier. `NULL` triggers single-bench model; a column name triggers the joint multi-bench model |
-| `estimate_type` | `"BLUEs"` | `"BLUEs"` (genotype fixed, no shrinkage), `"BLUPs"` (genotype random, shrinkage toward mean), or `"both"` |
+| `estimate_type` | `"BLUEs"` | `"BLUEs"` (genotype fixed, no shrinkage), `"BLUPs"` (genotype random, shrinkage toward mean), or `"both"`. **BLUPs and "both" are available for single-bench runs only; multi-bench runs support only BLUEs.** |
 | `k_row` / `k_col` | `NULL` | Basis dimension for the spatial smoother. Auto rule: `min(max(5, floor(n_unique/2)), 20)`. Increase for very large grids |
 | `rda_object` | `NULL` | Object name to extract from a `.rda` file; `NULL` uses the first data frame found |
 
@@ -726,7 +726,7 @@ model, writes all outputs, and returns results invisibly.
 | `row_col` | `"row"` | Row coordinate column name (must be numeric) |
 | `col_col` | `"col"` | Column coordinate column name (must be numeric) |
 | `bench_col` | `NULL` | Bench column name; `NULL` triggers the single-bench model |
-| `estimate_type` | `"BLUEs"` | One of `"BLUEs"`, `"BLUPs"`, or `"both"` |
+| `estimate_type` | `"BLUEs"` | One of `"BLUEs"`, `"BLUPs"`, or `"both"`. BLUPs/both require single-bench mode (`bench_col = NULL`) |
 | `k_row` | `NULL` | Basis dimension for rows; `NULL` = auto via `adaptive_nseg()` |
 | `k_col` | `NULL` | Basis dimension for columns; `NULL` = auto |
 | `rda_object` | `NULL` | Object name to extract from `.rda` file; `NULL` = first data frame |
