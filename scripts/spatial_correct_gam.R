@@ -193,6 +193,64 @@ plot_variogram <- function(vgram, title = "") {
 }
 
 
+#' Plot row and column random effect magnitudes
+#'
+#' Returns a two-panel (row | col) strip plot showing the estimated random
+#' effect for each row and column level. Useful for diagnosing systematic
+#' edge or lane effects that the smooth surface cannot capture.
+#'
+#' @param bench_data  data.frame for the bench
+#' @param result      Return value from fit_mgcv_bench() or fit_mgcv_joint()
+#' @param row_col     Row coordinate column name
+#' @param col_col     Column coordinate column name
+#' @param bench_label Character label for title
+#' @return patchwork ggplot or NULL if no RE data available
+plot_row_col_re <- function(bench_data, result, row_col, col_col,
+                            bench_label = "") {
+  if (is.null(result$row_re) && is.null(result$col_re)) return(NULL)
+
+  plots <- list()
+
+  if (!is.null(result$row_re)) {
+    rd <- data.frame(level = bench_data[[row_col]], effect = result$row_re)
+    rd <- aggregate(effect ~ level, data = rd, FUN = mean)
+    plots$row <- ggplot(rd, aes(x = factor(level), y = effect)) +
+      geom_col(fill = "#2c7bb6", alpha = 0.7, width = 0.6) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+      labs(title = "Row random effects", x = row_col, y = "Effect") +
+      theme_bw(base_size = 8) +
+      theme(plot.title = element_text(size = 9, face = "bold", hjust = 0.5),
+            axis.title = element_text(size = 7),
+            axis.text  = element_text(size = 6))
+  }
+
+  if (!is.null(result$col_re)) {
+    cd <- data.frame(level = bench_data[[col_col]], effect = result$col_re)
+    cd <- aggregate(effect ~ level, data = cd, FUN = mean)
+    plots$col <- ggplot(cd, aes(x = factor(level), y = effect)) +
+      geom_col(fill = "#d7191c", alpha = 0.7, width = 0.6) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+      labs(title = "Column random effects", x = col_col, y = "Effect") +
+      theme_bw(base_size = 8) +
+      theme(plot.title = element_text(size = 9, face = "bold", hjust = 0.5),
+            axis.title = element_text(size = 7),
+            axis.text  = element_text(size = 6))
+  }
+
+  if (length(plots) == 0) return(NULL)
+
+  page_title <- paste0("Row / column random effects",
+                       if (bench_label != "") paste0("  |  ", bench_label) else "")
+
+  composite <- wrap_plots(plots, ncol = length(plots)) +
+    plot_annotation(
+      title = page_title,
+      theme = theme(plot.title = element_text(size = 11, face = "bold"))
+    )
+  composite
+}
+
+
 #' Compose 6-panel diagnostic plot for one bench x trait
 #'
 #' Panels: observed | spatial trend | residuals (top row)
@@ -209,7 +267,9 @@ make_diagnostic_plots <- function(bench_data, result, pheno,
                                    row_col, col_col, bench_label = "") {
   pd <- bench_data[, c(row_col, col_col), drop = FALSE]
   pd$obs     <- bench_data[[pheno]]
-  pd$spatial <- if (!is.null(result$spatial))   result$spatial   else NA_real_
+  pd$spatial <- if (!is.null(result$spatial_smooth)) result$spatial_smooth
+                else if (!is.null(result$spatial))   result$spatial
+                else NA_real_
   pd$resid   <- if (!is.null(result$residuals)) result$residuals else NA_real_
 
   safe_range <- function(...) {
@@ -279,12 +339,14 @@ make_diagnostic_plots <- function(bench_data, result, pheno,
 #' @param k_row         Basis dimension for rows (NULL = auto)
 #' @param k_col         Basis dimension for columns (NULL = auto)
 #' @param estimate_type "BLUEs", "BLUPs", or "both"
-#' @return list(blues, blups, fitted, residuals, spatial, converged, edf_spatial)
+#' @return list(blues, blups, fitted, residuals, spatial_smooth, spatial_total,
+#'              row_re, col_re, converged, edf_spatial)
 fit_mgcv_bench <- function(bench_data, pheno, geno_col, row_col, col_col,
                             k_row = NULL, k_col = NULL,
                             estimate_type = "BLUEs") {
   res <- list(blues = NULL, blups = NULL, fitted = NULL,
-              residuals = NULL, spatial = NULL,
+              residuals = NULL, spatial_smooth = NULL, spatial_total = NULL,
+              row_re = NULL, col_re = NULL,
               converged = NA, edf_spatial = NA)
 
   bench_data[[geno_col]] <- as.factor(bench_data[[geno_col]])
@@ -328,10 +390,20 @@ fit_mgcv_bench <- function(bench_data, pheno, geno_col, row_col, col_col,
 
       terms_pred     <- predict(m, type = "terms")
       te_col         <- grep("^te\\(", colnames(terms_pred), value = TRUE)
-      res$spatial    <- as.numeric(terms_pred[, te_col[1]])
-      res$fitted     <- as.numeric(fitted(m))
-      res$residuals  <- as.numeric(residuals(m))
-      res$edf_spatial <- sum(m$edf[grep("^te\\(", names(m$edf))])
+      row_re_col     <- grep("^s\\(row_f\\)", colnames(terms_pred), value = TRUE)
+      col_re_col     <- grep("^s\\(col_f\\)", colnames(terms_pred), value = TRUE)
+
+      smooth_val     <- as.numeric(terms_pred[, te_col[1]])
+      row_re_val     <- if (length(row_re_col)) as.numeric(terms_pred[, row_re_col[1]]) else rep(0, nrow(bench_data))
+      col_re_val     <- if (length(col_re_col)) as.numeric(terms_pred[, col_re_col[1]]) else rep(0, nrow(bench_data))
+
+      res$spatial_smooth <- smooth_val
+      res$spatial_total  <- smooth_val + row_re_val + col_re_val
+      res$row_re         <- row_re_val
+      res$col_re         <- col_re_val
+      res$fitted         <- as.numeric(fitted(m))
+      res$residuals      <- as.numeric(residuals(m))
+      res$edf_spatial    <- sum(m$edf[grep("^te\\(", names(m$edf))])
     }
   }
 
@@ -417,7 +489,9 @@ fit_mgcv_bench <- function(bench_data, pheno, geno_col, row_col, col_col,
 fit_mgcv_joint <- function(data, pheno, geno_col, row_col, col_col, bench_col,
                             k_row = NULL, k_col = NULL,
                             estimate_type = "BLUEs") {
-  res <- list(blues = NULL, fitted = NULL, residuals = NULL, spatial = NULL,
+  res <- list(blues = NULL, fitted = NULL, residuals = NULL,
+              spatial_smooth = NULL, spatial_total = NULL,
+              row_re = NULL, col_re = NULL,
               converged = NA, edf_spatial = NA)
 
   data[[geno_col]] <- as.factor(data[[geno_col]])
@@ -470,11 +544,27 @@ fit_mgcv_joint <- function(data, pheno, geno_col, row_col, col_col, bench_col,
 
   terms_pred      <- predict(m, type = "terms")
   te_cols         <- grep("^te\\(", colnames(terms_pred), value = TRUE)
-  res$spatial     <- if (length(te_cols) > 0)
+  row_re_cols     <- grep("^s\\(row_f", colnames(terms_pred), value = TRUE)
+  col_re_cols     <- grep("^s\\(col_f", colnames(terms_pred), value = TRUE)
+
+  smooth_val <- if (length(te_cols) > 0)
     as.numeric(rowSums(terms_pred[, te_cols, drop = FALSE]))
   else
     rep(0, nrow(data))
-  res$edf_spatial <- sum(m$edf[grep("^te\\(", names(m$edf))])
+  row_re_val <- if (length(row_re_cols) > 0)
+    as.numeric(rowSums(terms_pred[, row_re_cols, drop = FALSE]))
+  else
+    rep(0, nrow(data))
+  col_re_val <- if (length(col_re_cols) > 0)
+    as.numeric(rowSums(terms_pred[, col_re_cols, drop = FALSE]))
+  else
+    rep(0, nrow(data))
+
+  res$spatial_smooth <- smooth_val
+  res$spatial_total  <- smooth_val + row_re_val + col_re_val
+  res$row_re         <- row_re_val
+  res$col_re         <- col_re_val
+  res$edf_spatial    <- sum(m$edf[grep("^te\\(", names(m$edf))])
 
   res
 }
@@ -615,12 +705,13 @@ run_spatial_gam <- function(
         all_blups_list[[pheno]] <- df
       }
 
-      if (!is.null(result$spatial)) {
+      if (!is.null(result$spatial_smooth)) {
         spatial_rows[[length(spatial_rows) + 1]] <- data.frame(
           data[, c(geno_col, row_col, col_col), drop = FALSE],
-          bench         = "single",
-          pheno         = pheno,
-          spatial_trend = result$spatial,
+          bench          = "single",
+          pheno          = pheno,
+          spatial_smooth = result$spatial_smooth,
+          spatial_total  = result$spatial_total,
           stringsAsFactors = FALSE
         )
       }
@@ -646,6 +737,17 @@ run_spatial_gam <- function(
         cat("    Saved:", out_png, "\n")
       }
 
+      re_plot <- tryCatch(
+        plot_row_col_re(data, result, row_col, col_col, ""),
+        error = function(e) { warning("RE plot failed: ", e$message); NULL }
+      )
+      if (!is.null(re_plot)) {
+        out_png <- file.path(output_dir,
+                             paste0("row_col_re_", pheno, "_single.png"))
+        ggsave(out_png, re_plot, width = 8, height = 4, dpi = 150)
+        cat("    Saved:", out_png, "\n")
+      }
+
     } else {
       # Multi-bench path
       result <- fit_mgcv_joint(
@@ -667,11 +769,12 @@ run_spatial_gam <- function(
         all_blues_list[[pheno]] <- df
       }
 
-      if (!is.null(result$spatial)) {
+      if (!is.null(result$spatial_smooth)) {
         spatial_rows[[length(spatial_rows) + 1]] <- data.frame(
           data[, c(geno_col, row_col, col_col, bench_col), drop = FALSE],
-          pheno         = pheno,
-          spatial_trend = result$spatial,
+          pheno          = pheno,
+          spatial_smooth = result$spatial_smooth,
+          spatial_total  = result$spatial_total,
           stringsAsFactors = FALSE
         )
       }
@@ -696,9 +799,11 @@ run_spatial_gam <- function(
         b_mask  <- data[[bench_col]] == b
         b_data  <- data[b_mask, , drop = FALSE]
         b_result <- list(
-          spatial   = if (!is.null(result$spatial))   result$spatial[b_mask]   else NULL,
-          residuals = if (!is.null(result$residuals)) result$residuals[b_mask] else NULL,
-          fitted    = if (!is.null(result$fitted))    result$fitted[b_mask]    else NULL
+          spatial_smooth = if (!is.null(result$spatial_smooth)) result$spatial_smooth[b_mask] else NULL,
+          residuals      = if (!is.null(result$residuals))      result$residuals[b_mask]      else NULL,
+          fitted         = if (!is.null(result$fitted))         result$fitted[b_mask]          else NULL,
+          row_re         = if (!is.null(result$row_re))         result$row_re[b_mask]          else NULL,
+          col_re         = if (!is.null(result$col_re))         result$col_re[b_mask]          else NULL
         )
         diag_plot <- tryCatch(
           make_diagnostic_plots(b_data, b_result, pheno, row_col, col_col,
@@ -711,6 +816,19 @@ run_spatial_gam <- function(
           out_png <- file.path(output_dir,
                                paste0("diagnostics_", pheno, "_", safe_bench, ".png"))
           ggsave(out_png, diag_plot, width = 12, height = 8, dpi = 150)
+          cat("    Saved:", out_png, "\n")
+        }
+
+        re_plot <- tryCatch(
+          plot_row_col_re(b_data, b_result, row_col, col_col,
+                          paste0("Bench: ", b)),
+          error = function(e) { warning("RE plot failed (bench ", b, "): ",
+                                        e$message); NULL }
+        )
+        if (!is.null(re_plot)) {
+          out_png <- file.path(output_dir,
+                               paste0("row_col_re_", pheno, "_", safe_bench, ".png"))
+          ggsave(out_png, re_plot, width = 8, height = 4, dpi = 150)
           cat("    Saved:", out_png, "\n")
         }
       }
@@ -798,8 +916,8 @@ run_spatial_gam <- function(
         sub <- sp_df[sp_df$pheno == ph, ]
       }
       if (nrow(sub) == 0) return(NULL)
-      sub_plot <- sub[, c(row_col, col_col, "spatial_trend"), drop = FALSE]
-      plot_heatmap(sub_plot, row_col, col_col, "spatial_trend",
+      sub_plot <- sub[, c(row_col, col_col, "spatial_smooth"), drop = FALSE]
+      plot_heatmap(sub_plot, row_col, col_col, "spatial_smooth",
                    title = paste0(ph, " | ", b))
     })
     sp_plots <- Filter(Negate(is.null), sp_plots)
@@ -808,7 +926,7 @@ run_spatial_gam <- function(
       n_col_grid <- min(length(sp_plots), 3L)
       composite  <- wrap_plots(sp_plots, ncol = n_col_grid) +
         plot_annotation(
-          title = "Spatial trend surfaces",
+          title = "Spatial smooth surfaces (te only)",
           theme = theme(plot.title = element_text(size = 13, face = "bold"))
         )
       out_png <- file.path(output_dir, "spatial_surfaces.png")

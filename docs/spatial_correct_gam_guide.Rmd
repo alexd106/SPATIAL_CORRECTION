@@ -306,7 +306,7 @@ The function prints a progress log as it runs and returns a named list invisibly
 |---|---|
 | `$blues` | data.frame of BLUEs: one row per genotype, one value + SE column per trait |
 | `$blups` | data.frame of BLUPs (if `estimate_type` includes BLUPs, otherwise `NULL`) |
-| `$spatial_trends` | data.frame of per-plot estimated spatial effects |
+| `$spatial_trends` | data.frame of per-plot spatial effects (`spatial_smooth` and `spatial_total` columns) |
 | `$model_summary` | data.frame of per-trait/bench fit statistics |
 
 The same information is also written to CSV files in `output_dir` (see Section 5).
@@ -366,6 +366,7 @@ where:
   column random effects nested within bench; absorb residual directional trends
 
 ```{r fit-model, cache=TRUE}
+# Returns: spatial_smooth, spatial_total, row_re, col_re (updated API)
 result <- fit_mgcv_joint(
   data      = data,
   pheno     = "BNI",
@@ -419,21 +420,28 @@ in the spatial surface itself.
 
 ## `spatial_trends.csv`
 
-One row per plot, with the estimated spatial contribution at each position.
-This is useful for quality control and for understanding where spatial correction
-was large.
+One row per plot, with two spatial contribution columns:
+
+- **`spatial_smooth`**: the `te()` P-spline surface only — a smooth 2D trend
+  suitable for surface plots
+- **`spatial_total`**: the full location-driven correction including row and
+  column random effects — the complete spatial adjustment removed from the data
 
 ```{r write-spatial-trends}
 sp_df <- data[, c(geno_col, row_col, col_col, bench_col), drop = FALSE]
-sp_df$spatial_trend <- result$spatial
+sp_df$spatial_smooth <- result$spatial_smooth
+sp_df$spatial_total  <- result$spatial_total
 
 write.csv(sp_df, file.path(output_dir, "spatial_trends.csv"), row.names = FALSE)
 
 cat("-- spatial_trends.csv -----------------------------------------------------\n")
 cat("  Rows:", nrow(sp_df), "\n")
-cat("  Spatial range: [",
-    round(min(sp_df$spatial_trend), 2), ",",
-    round(max(sp_df$spatial_trend), 2), "]\n")
+cat("  Smooth range: [",
+    round(min(sp_df$spatial_smooth), 2), ",",
+    round(max(sp_df$spatial_smooth), 2), "]\n")
+cat("  Total range:  [",
+    round(min(sp_df$spatial_total), 2), ",",
+    round(max(sp_df$spatial_total), 2), "]\n")
 ```
 
 ## `model_summary.csv`
@@ -472,9 +480,9 @@ for (b in benches) {
   b_mask  <- data[[bench_col]] == b
   b_data  <- data[b_mask, ]
   b_res   <- list(
-    spatial   = result$spatial[b_mask],
-    residuals = result$residuals[b_mask],
-    fitted    = result$fitted[b_mask]
+    spatial_smooth = result$spatial_smooth[b_mask],
+    residuals      = result$residuals[b_mask],
+    fitted         = result$fitted[b_mask]
   )
 
   p_diag <- make_diagnostic_plots(b_data, b_res, pheno = "BNI",
@@ -492,9 +500,9 @@ b        <- "Bench4"
 b_mask   <- data[[bench_col]] == b
 b_data   <- data[b_mask, ]
 b_res    <- list(
-  spatial   = result$spatial[b_mask],
-  residuals = result$residuals[b_mask],
-  fitted    = result$fitted[b_mask]
+  spatial_smooth = result$spatial_smooth[b_mask],
+  residuals      = result$residuals[b_mask],
+  fitted         = result$fitted[b_mask]
 )
 make_diagnostic_plots(b_data, b_res, pheno = "BNI",
                       row_col = row_col, col_col = col_col,
@@ -512,11 +520,13 @@ consistently darker or lighter than interior plots, there is a spatial signal.
 **What to look for:** any systematic colour pattern (gradient, edge effect,
 striping). Random salt-and-pepper colour is measurement noise and is expected.
 
-### Panel 2: Spatial trend heatmap (top-centre)
+### Panel 2: Spatial smooth heatmap (top-centre)
 
-The estimated spatial surface from the `te()` smoother, i.e. what the model attributes
-to the physical location rather than the genotype. This is the environmental
-landscape the model has learned.
+The estimated 2D spatial surface from the `te()` P-spline smoother alone (row
+and column random effects are excluded from this panel so the surface remains
+smooth and interpretable). The full spatial correction applied to the data also
+includes row and column random effects; their magnitudes are shown in a separate
+row/column RE strip plot.
 
 **What to look for:** the surface should look like a smooth, plausible
 environmental gradient. If it shows the same spatial structure as the observed
@@ -574,8 +584,8 @@ an unusually large true effect that the model is struggling with.
 Compare the diagnostic plots across benches to see how increasing spatial
 intensity affects the correction.
 
-```{r compare-spatial-surfaces, fig.height=8, fig.cap="Estimated spatial trend surfaces for all four benches on a shared colour scale. The model captures both the edge-effect structure and the increasing intensity from Bench1 to Bench4."}
-data$spatial_est <- result$spatial
+```{r compare-spatial-surfaces, fig.height=8, fig.cap="Estimated spatial smooth surfaces (te() only) for all four benches on a shared colour scale. The model captures both the edge-effect structure and the increasing intensity from Bench1 to Bench4."}
+data$spatial_est <- result$spatial_smooth
 
 p_sp_est <- plot_all_bench_heatmaps(
   dfr          = data,
@@ -691,11 +701,12 @@ All outputs are also written to `output_dir`:
 |---|---|
 | `BLUEs.csv` | One row per genotype; one value + SE column per trait |
 | `BLUPs.csv` | Same structure, for BLUPs (only if `estimate_type = "BLUPs"` or `"both"`) |
-| `spatial_trends.csv` | Per-plot estimated spatial effect for quality control |
+| `spatial_trends.csv` | Per-plot spatial effects: `spatial_smooth` (te() surface) and `spatial_total` (including row/col REs) |
 | `model_summary.csv` | Residual SD, spatial EDF, convergence status per trait |
 | `diagnostics_{trait}_{bench}.png` | 6-panel diagnostic per bench per trait |
+| `row_col_re_{trait}_{bench}.png` | Row and column random effect strip plots per bench per trait |
 | `blues_distribution.png` | Histogram and density of BLUEs per trait |
-| `spatial_surfaces.png` | Spatial trend panels for all benches |
+| `spatial_surfaces.png` | Spatial smooth surfaces (te() only) for all benches |
 
 ---
 
@@ -907,9 +918,9 @@ when benches differ in size.
 | `estimate_type` | `"BLUEs"` | Only `"BLUEs"` is supported for the joint model |
 
 **Returns:** named list with the same structure as `fit_mgcv_bench()`, except
-`$blues` is always populated (joint model only supports BLUEs) and `$spatial`
-is the concatenated spatial trend across all benches in the same row order as
-the input `data`.
+`$blues` is always populated (joint model only supports BLUEs), and `$spatial_smooth`
+/ `$spatial_total` / `$row_re` / `$col_re` are concatenated across all benches
+in the same row order as the input `data`.
 
 ---
 

@@ -849,29 +849,14 @@ run_spatial_correction <- function(fn,
   benches <- sort(unique(dfr[[bench_col_use]]))
 
   # ------------------------------------------------------------------
-  # 2. Outlier detection and reporting
+  # 2. Outlier detection report setup (detection is per-bench, in step 5)
   # ------------------------------------------------------------------
   report_path <- file.path(output_dir, "outlier_report.txt")
   rcon        <- file(report_path, "w")
+  on.exit(close(rcon), add = TRUE)
   writeLines(paste0("Outlier report  |  ", Sys.time()), rcon)
   writeLines(paste0("File: ", fn), rcon)
   writeLines("", rcon)
-
-  for (tr in trait_cols) {
-    if (outlier_iqr) {
-      cat(sprintf("Checking outliers: %s\n", tr))
-      out <- replace_outliers_with_na(dfr[[tr]])
-      dfr[[tr]] <- out$x
-      writeLines(paste0("Trait: ", tr), rcon)
-      writeLines(paste0("  Outliers replaced: ", out$n_outliers), rcon)
-      if (out$n_outliers > 0)
-        writeLines(paste0("  Values: ",
-                           paste(round(out$outlier_values, 3), collapse = ", ")),
-                   rcon)
-      writeLines("", rcon)
-    }
-  }
-  close(rcon)
 
   # ------------------------------------------------------------------
   # 3. Prepare output containers
@@ -911,6 +896,26 @@ run_spatial_correction <- function(fn,
       # Working data for this bench: only rows with non-NA pheno
       bench_data <- bench_data_full
       bench_data[[tr]] <- as.numeric(bench_data[[tr]])
+
+      # Per-bench outlier detection (IQR fences computed within this bench)
+      if (outlier_iqr) {
+        out <- replace_outliers_with_na(bench_data[[tr]])
+        bench_data[[tr]] <- out$x
+        # Write back to master frame and fitted_out so removals propagate
+        row_idx_outlier <- which(dfr[[bench_col_use]] == bn)
+        dfr[[tr]][row_idx_outlier]        <- out$x
+        fitted_out[[tr]][row_idx_outlier] <- out$x
+        # Report
+        bench_tag <- if (bench_col_use == ".bench_internal") "" else
+                       paste0(" | Bench: ", bn)
+        writeLines(paste0("Trait: ", tr, bench_tag), rcon)
+        writeLines(paste0("  Outliers replaced: ", out$n_outliers), rcon)
+        if (out$n_outliers > 0)
+          writeLines(paste0("  Values: ",
+                             paste(round(out$outlier_values, 3),
+                                   collapse = ", ")), rcon)
+        writeLines("", rcon)
+      }
 
       # Track which rows have valid phenotype values so model outputs
       # (which exclude NA rows) can be written back to the correct positions

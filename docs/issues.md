@@ -13,46 +13,28 @@ It supersedes [live_issues.md](docs/legacy/live_issues.md).
 
 ## High Priority
 
-### 1. `run_spatial_correction()` does not consistently handle missing phenotypes after outlier removal
+### ~~1. `run_spatial_correction()` does not consistently handle missing phenotypes after outlier removal~~
 
-Summary:
+**Status: Fixed**
 
-`run_spatial_correction()` does not safely subset or realign rows after
-phenotype values are replaced with `NA`. Downstream model outputs can therefore
-be written back against the wrong rows.
+NA rows from outlier removal are now filtered into `bench_data_complete` before
+passing to model functions. Write-back uses `complete_idx` (the subset of
+`row_idx` with valid phenotypes) so fitted/residual/spatial columns align
+correctly. `_Observed` still uses the full `row_idx` to preserve original values
+including NAs.
 
-Impact:
+### ~~2. Exported `spatial` trend omits row and column random effects~~
 
-- `fitted_values.csv` may be misaligned
-- diagnostics may be wrong
-- method comparisons may be wrong
+**Status: Fixed**
 
-References:
-
-- [fit_spatial_models.R#L911](scripts/fit_spatial_models.R#L911)
-- [fit_spatial_models.R#L1027](scripts/fit_spatial_models.R#L1027)
-
-### 2. Exported `spatial` trend omits row and column random effects
-
-Summary:
-
-The exported `spatial` component in the `mgcv` fitters currently reflects only
-the `te(...)` smooth, not the full location-driven correction term described in
-the docs.
-
-Impact:
-
-- `spatial_trends.csv` is incomplete
-- `spatial_surfaces.png` is incomplete
-- the guide overstates what the spatial-trend output represents
-
-References:
-
-- [spatial_correct_gam.R#L302](scripts/spatial_correct_gam.R#L302)
-- [spatial_correct_gam.R#L329](scripts/spatial_correct_gam.R#L329)
-- [spatial_correct_gam.R#L471](scripts/spatial_correct_gam.R#L471)
-- [spatial_correct_gam_guide.Rmd#L68](docs/spatial_correct_gam_guide.Rmd#L68)
-- [spatial_correct_gam_guide.Rmd#L517](docs/spatial_correct_gam_guide.Rmd#L517)
+Both fitters (`fit_mgcv_bench`, `fit_mgcv_joint`) now return `spatial_smooth`
+(the `te()` surface only) and `spatial_total` (`te()` + row RE + column RE),
+plus `row_re` and `col_re` vectors. `spatial_trends.csv` exports both columns.
+The diagnostic heatmap in Panel 2 uses `spatial_smooth` (smooth and
+interpretable); a separate `row_col_re_{trait}_{bench}.png` strip plot shows the
+row and column RE magnitudes. The guide panel descriptions and output-file table
+have been updated to reflect this split. BLUEs are unaffected — they were
+computed from the full model throughout.
 
 ---
 
@@ -73,17 +55,14 @@ References:
 - [spatial_correct_gam_guide.Rmd#L282](docs/spatial_correct_gam_guide.Rmd#L282)
 - [spatial_correct_gam_guide.Rmd#L718](docs/spatial_correct_gam_guide.Rmd#L718)
 
-### 4. Outlier detection is global by trait rather than bench-specific
+### ~~4. Outlier detection is global by trait rather than bench-specific~~
 
-Summary:
+**Status: Fixed**
 
-The current IQR rule is applied across the pooled trait distribution, which is
-not appropriate for heterogeneous multi-bench data.
-
-References:
-
-- [fit_spatial_models.R#L860](scripts/fit_spatial_models.R#L860)
-- [fit_spatial_models.R#L863](scripts/fit_spatial_models.R#L863)
+Outlier detection (1.5 × IQR) is now applied per-bench within the main
+bench × trait loop, so fences are computed from each bench's own distribution.
+The outlier report now includes bench labels. Single-bench runs are unaffected
+(trivially equivalent).
 
 ### 5. Main report is coherent as a results document but not self-contained as a reproducible workflow
 
@@ -120,7 +99,8 @@ References:
 
 ## Open Design Questions
 
-- Should exported “spatial trend” mean only the smooth `te(...)` surface, or the
-  full location-driven correction including row and column random effects?
+- ~~Should exported “spatial trend” mean only the smooth `te(...)` surface, or the
+  full location-driven correction including row and column random effects?~~
+  **Resolved:** export both as `spatial_smooth` and `spatial_total` (see issue 2).
 - Is `run_spatial_correction()` intended to be a production entry point or an
   internal analysis script?
