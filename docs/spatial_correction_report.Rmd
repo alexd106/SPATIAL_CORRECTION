@@ -44,16 +44,16 @@ fig_label <- function(section) {
 
 ## TL;DR
 
-This document describes the development and validation of a multi-method spatial correction framework for field-based trial data in R. Spatial variation across field plots or glasshouse benches, caused by irrigation gradients, soil heterogeneity, edge drying, and microclimate effects, may bias phenotypic measurements and thereby impact genotype rankings. Correcting for this variation is essential before downstream analyses such as GWAS.
+This document describes the development and validation of a general approach for spatial correction in field/glasshouse-based trial data in R. Spatial variation across field plots or glasshouse benches, caused by irrigation gradients, soil heterogeneity, edge drying, and microclimate effects, may bias phenotypic measurements and thereby impact genotype rankings. Correcting for this variation is important before downstream analyses such as GWAS.
 
 The report is structured in two parts:
 
-**Part 1** compares three packages: SpATS, mgcv, and sommer on replicated real data. The GAM fitted using mgcv with default settings substantially under-corrects relative to SpATS and sommer. The performance gap is due to a single missing model component: row and column random effects. Adding these closes the gap entirely (r = 0.9996 with SpATS).
+**Part 1** compares three packages: SpATS, sommer, and mgcv on replicated real data. The aim here is to specify a generalised additive model using the package `mgcv` and compare performance with the existing SpATS and sommer packages. The GAM fitted using mgcv with default settings substantially under-corrects relative to SpATS and sommer. The performance gap is due to a single missing model component: row and column random effects. Adding these closes the gap entirely.
 
-**Part 2** addresses the primary use case to correct phenotypes where genotypes are unreplicated within each field/plot/bench (hereafter referred to as a bench) but replicated across spatial units. Per-bench models (including SpATS) can only produce BLUPs (shrunken estimates) that compress genotype differences and are not particularly suitable for downstream GWAS. Joint multi-bench models recover proper BLUEs by pooling information across benches, reducing RMSE by approximately 3× relative to averaged per-bench BLUPs (~2.1 vs ~6.2).
+**Part 2** addresses the primary use case to correct phenotypes where genotypes are unreplicated within each field/plot/bench (hereafter referred to as a bench) but replicated across spatial units. Per-bench models (including SpATS) can only produce BLUPs (shrunken estimates) that compress genotype differences and are not particularly suitable for downstream GWAS. Joint multi-bench models recover proper BLUEs by pooling information across benches, reducing RMSE by approximately 3× relative to averaged per-bench BLUPs.
 
 
-## Part 1: Per-bench unit correction with replicated Data
+## Part 1: Per-bench correction with replicated data
 
 ### The problem
 
@@ -70,11 +70,11 @@ $$y_{irc} = g_i + \xi(r, c) + \varepsilon_{irc}$$
 
 If $\xi(r,c)$ is not modelled, genotype estimates may be confounded with the spatial pattern. Spatial correction aims to estimate and remove $\xi(r,c)$, recovering unbiased genotype effects $\hat{g}_i$.
 
-In a **replicated** design (multiple observations per genotype), genotype effects can be estimated as fixed effects producing BLUEs (Best Linear Unbiased Estimates). BLUEs are unshrunken estimates on the true phenotypic scale, the preferred input for GWAS.
+In a **replicated** design (multiple observations per genotype within a field/bench), genotype effects can be estimated as fixed effects producing BLUEs (Best Linear Unbiased Estimates). BLUEs are unshrunken estimates on the true phenotypic scale, the preferred input for GWAS.
 
 ### Model specifications
 
-Three packages are implemented, two of which have been developed specifically for this problem (SpATS and sommer) and one more general modelling package (mgcv). All share the same conceptual structure (estimating a 2D spatial surface and extracting genotype effects) but differ in how the surface is modelled and estimated.
+We compare three packages: SpATS and sommer, both developed specifically for spatial field trial analysis, and mgcv, a more general modelling package. All three share the same conceptual structure (estimating a 2D spatial surface and extracting genotype effects) but differ in how the surface is modelled and estimated.
 
 #### SpATS
 
@@ -95,20 +95,6 @@ SpATS includes row and column random effects by default.
 
 **Note on spatial surface scaling:** SpATS's PSANOVA decomposition constrains each component of $f_\text{SAP}$ (row, column, interaction) independently, but the combined surface is not constrained to be zero-mean over the observed data. As a result, `predict(model, which = genotype)` returns BLUEs that are $\approx \bar{\xi}$ below the phenotype scale, where $\bar{\xi}$ is the mean of the fitted spatial surface. For `wheatdata`, $\bar{\xi} \approx 64$ units. The framework corrects for this by centring the spatial surface ($\xi \leftarrow \xi - \bar{\xi}$) and adding $\bar{\xi}$ back to all BLUEs/BLUPs, so SpATS estimates are on the same absolute scale as mgcv and sommer.
 
-#### mgcv with default arguments
-
-mgcv fits a generalised additive model with a tensor-product smooth for the spatial surface:
-
-$$y_{irc} = g_i + \text{te}(r, c) + \varepsilon_{irc}$$
-
-| Term | Type | Description |
-|------|------|-------------|
-| $g_i$ | Fixed (`0 + Genotype`) | Genotype effect: each coefficient is directly a BLUE |
-| $\text{te}(r, c)$ | Penalised tensor-product smooth | Anisotropic 2D spatial surface with smoothness estimated automatically by REML. No manual `nseg` required. |
-| $\varepsilon_{irc}$ | $N(0, \sigma^2_e)$ | Plot-level residual |
-
-The default mgcv model does not include row/column random effects.
-
 #### sommer
 
 sommer models the spatial surface as a random effect rather than a fixed smooth:
@@ -128,9 +114,27 @@ sommer includes row/column random effects by default. The spatial surface is ran
 
 **Note:** `spl2Dc()` requires `sommer::mmes()`, not `mmer()`. BLUEs use treatment contrasts and must be recovered via `model.matrix(~ Genotype) %*% m$b`.
 
+#### mgcv with default arguments
+
+mgcv fits a generalised additive model (GAM) with a tensor-product smooth for the spatial surface:
+
+$$y_{irc} = g_i + \text{te}(r, c) + \varepsilon_{irc}$$
+
+```r
+gam(yield ~ 0 + Genotype + te(row, col), data = df, method = "REML")
+```
+
+| Term | Type | Description |
+|------|------|-------------|
+| $g_i$ | Fixed (`0 + Genotype`) | Genotype effect: each coefficient is directly a BLUE |
+| $\text{te}(r, c)$ | Penalised tensor-product smooth | Anisotropic 2D spatial surface with smoothness estimated automatically by REML. No manual `nseg` required. |
+| $\varepsilon_{irc}$ | $N(0, \sigma^2_e)$ | Plot-level residual |
+
+The default mgcv model does not include row/column random effects.
+
 ### Comparing methods for single bench replicated data
 
-The framework was validated on the `wheatdata` dataset: 330 plots, 107 genotypes, 3 replicates, 22 rows × 15 columns. All three methods were run with `output_type = "BLUEs"`.
+We validated on the `wheatdata` dataset (comes with the SpATS package): 330 plots, 107 genotypes, 3 replicates, 22 rows × 15 columns.
 
 #### Baseline SpATS diagnostic output
 
@@ -140,29 +144,29 @@ knitr::include_graphics("figures/s1_wheatdata_spats_diag.png")
 
 #### Three-method comparison
 
-```{r s1-method-comparison, fig.cap="**Figure 1.2:** Method comparison on wheatdata. Top row: estimated spatial trend heatmaps for SpATS, mgcv (default), and sommer. SpATS and sommer capture similar patterns with comparable magnitude. Default mgcv captures a substantially weaker pattern. Bottom row: pairwise BLUE correlations. After centring the SpATS spatial surface (see spatial surface scaling note above), all three methods produce BLUEs on the same absolute phenotype scale. SpATS and sommer are near-identical (r = 0.992) and sit on the 1:1 line. Default mgcv diverges from both (r = 0.871) due to under-correction, not a scale shift."}
+```{r s1-method-comparison, fig.cap="**Figure 1.2:** Method comparison on wheatdata. Top row: estimated spatial trend heatmaps for SpATS, sommer, and mgcv (default). SpATS and sommer capture similar patterns with comparable magnitude. Default mgcv captures a substantially weaker pattern. Bottom row: pairwise BLUE correlations. After centring the SpATS spatial surface (see spatial surface scaling note above), all three methods produce BLUEs on the same absolute phenotype scale. SpATS and sommer are near-identical (r = 0.992) and sit on the 1:1 line. Default mgcv diverges from both (r = 0.871) due to under-correction, not a scale shift."}
 knitr::include_graphics("figures/s1_wheatdata_method_comparison.png")
 ```
 
 #### Summary metrics
 
-| Metric | SpATS | mgcv (default) | sommer |
-|--------|-------|----------------|--------|
-| Residual SD | 34.05 | 63.01 | 33.18 |
-| BLUE correlation with SpATS | --- | 0.871 | 0.992 |
+| Metric | SpATS | sommer | mgcv (default) |
+|--------|-------|--------|----------------|
+| Residual SD | 34.05 | 33.18 | 63.01 |
+| BLUE correlation with SpATS | --- | 0.992 | 0.871 |
 
-The default mgcv model leaves residual SD nearly twice that of SpATS and sommer. This motivated the investigation below.
+The default mgcv model leaves residual SD nearly twice that of SpATS and sommer which is not great. Can we do better?
 
 ### Closing the mgcv performance gap
 
 #### Rationale
 
-The under-correction by default mgcv could stem from two differences relative to SpATS and sommer:
+The under-correction by our first model fitted with mgcv could stem from two differences relative to SpATS and sommer:
 
 1. **Spline basis type:** mgcv uses cubic regression (cr) by default; SpATS and sommer use P-splines
 2. **Row/column random effects:** SpATS includes `random = ~ row + col`; sommer includes row + col in its random formula; mgcv includes neither
 
-Five mgcv variants were tested to isolate the cause:
+We tested five mgcv variants to isolate the cause:
 
 | Variant | Spline basis | k (complexity) | Row/col RE |
 |---------|-------------|----------------|------------|
@@ -193,45 +197,56 @@ knitr::include_graphics("figures/s1_mgcv_psre_diag.png")
 
 The performance gap was driven entirely by the missing row/column random effects, not the spline basis type. Changing from cubic regression to P-spline bases alone made negligible difference (residual SD 62.41 vs 63.01). Increasing k had minimal effect (61.88). But adding `s(row_f, bs="re") + s(col_f, bs="re")` dropped residual SD from 62 to 34, matching SpATS almost exactly (r = 0.9996).
 
-Row and column random effects capture systematic linear-like variation (irrigation gradients along rows, edge drying along columns) that a smooth 2D surface cannot efficiently represent on its own. SpATS and sommer include these by default; any spatial correction model should do likewise.
+Row and column random effects capture systematic linear-like variation (irrigation gradients, edge drying etc) that a smooth 2D surface cannot efficiently represent on its own. SpATS and sommer include these by default.
+
+When row and column random effects are included, the mgcv model achieves equivalent performance to both SpATS and sommer for replicated designs: residual standard deviations are near-identical (34.0 for mgcv vs 34.1 for SpATS and 33.2 for sommer) and genotype BLUEs correlate at r = 0.9996 with SpATS. This confirms that all three frameworks estimate the same underlying spatial structure and that the choice of package for replicated data is largely one of convenience.
 
 The optimised mgcv model (`mgcv_ps_re`) is:
 
 $$y_{irc} = g_i + \text{te}(r, c, \text{bs}=\text{"ps"}) + s(\text{row}_r, \text{bs}=\text{"re"}) + s(\text{col}_c, \text{bs}=\text{"re"}) + \varepsilon_{irc}$$
+
+```r
+gam(yield ~ 0 + Genotype +
+      te(row, col, bs = "ps") +
+      s(row_f, bs = "re") + s(col_f, bs = "re"),
+    data = df, method = "REML")
+```
 
 
 ## Part 2: Joint Multi-Bench Models for Unreplicated Designs
 
 ### Why per-bench BLUEs fail with unreplicated data
 
-The primary use case involves multiple benches (in our case 4) where genotypes are unreplicated within each bench but replicated across benches. This creates a fundamental statistical problem for per-bench analysis.
+Our primary use case involves multiple benches (in our case 4) where genotypes are unreplicated within each bench but replicated across benches. This creates a fundamental statistical problem for per-bench correction.
 
-When genotype is treated as a fixed effect (to obtain BLUEs), the model estimates one parameter per genotype. With $n$ genotypes and $n$ observations per bench (one per genotype), the genotype effects consume all degrees of freedom and the model is saturated. There is no residual variance left for the spatial smooth to work with. In practice:
+To obtain BLUEs we need genotype as a fixed effect, which means estimating one parameter per genotype. With $n$ genotypes and only $n$ observations per bench (one per genotype), the genotype effects consume all available degrees of freedom. The model is saturated and there is nothing left for the spatial smooth to estimate against. In practice:
 
 - **SpATS** and **sommer** per-bench BLUEs fail outright or produce degenerate estimates
 - **mgcv** per-bench BLUEs fit numerically but the spatial smooth is suppressed (EDF $\approx$ 0), rendering the correction useless
 
-Therefore the only viable option with per-bench models on unreplicated data is to use BLUPs with genotype as a random effect ($g_i \sim N(0, \sigma^2_g)$). BLUPs use shrinkage: they borrow strength across genotypes, enabling spatial correction, but pull genotype estimates toward the population mean. The degree of shrinkage is governed by the ratio $\sigma^2_g / \sigma^2_e$. Shrinkage compresses the genotype value range, potentially biasing effect size estimates for GWAS and underestimating extreme genotypes (often the ones of most interest to breeders).
+Therefore the only viable option with per-bench models on unreplicated data is to use BLUPs with genotype as a random effect ($g_i \sim N(0, \sigma^2_g)$). BLUPs use shrinkage: they borrow strength across genotypes, enabling spatial correction, but pull genotype estimates toward the population mean. The degree of shrinkage is governed by the ratio $\sigma^2_g / \sigma^2_e$. Shrinkage compresses the genotype value range, potentially biasing effect size estimates for GWAS and underestimating extreme genotypes (often the ones of most interest).
 
 **Solution: joint multi-bench models.** Fitting a single model across all benches gives each genotype 4 observations (one per bench). The genotype effect becomes estimable as a fixed effect, yielding proper BLUEs without shrinkage.
 
 ### Simulation design
 
-To validate the joint models against known truth, the `simulate_spatial_data.R` script generates multi-bench trial data with the following structure:
+To validate the joint models against known truth, I wrote a little script `simulate_spatial_data.R` to generate multi-bench trial data with the following structure:
 
 - **4 benches**, 10 rows × 30 columns = 300 genotypes per bench
 - Genotypes unreplicated within bench; each genotype appears once per bench (4 total observations)
-- **Spatial pattern** (type 6, edge effects): elevated at field borders with diagonal asymmetry (top-left high, bottom-right low), centred to mean zero. This mimics glasshouse bench effects: drying at exposed edges, irrigation run-off gradients, asymmetric light or wind exposure.
-- **Varying spatial intensity per bench**: 15, 25, 40, 60, ranging from moderate (intensity 15 ≈ ±6 units, half of genotype SD) to very high (intensity 60 ≈ ±23 units, nearly twice genotype SD of 12)
+- **Spatial pattern** (edge effects): elevated at field borders with diagonal asymmetry (top-left high, bottom-right low), centred to mean zero. This mimics glasshouse bench effects: drying at exposed edges, irrigation run-off gradients, asymmetric light etc.
+- **Varying spatial pattern intensity per bench**: 15, 25, 40, 60, ranging from moderate (intensity 15 ≈ ±6 units, half of genotype SD) to very high (intensity 60 ≈ ±23 units, nearly twice genotype SD of 12)
 - Genotype SD = 12, error SD = 4
 
-```{r s2-true-spatial, fig.cap="**Figure 2.1:** True spatial patterns for each bench (type 6: edge effects with diagonal asymmetry). A single shared colour scale is used across all four panels to directly convey the 4-fold increase in spatial severity from Bench1 (intensity = 15) to Bench4 (intensity = 60, dominant yellow-to-purple contrast). The pattern mimics glasshouse edge effects: elevated phenotypes at borders, depressed in the interior."}
+This is the known 'true' spatial pattern. In practice we would never know this but when validating a potential modelling approach it's useful.
+
+```{r s2-true-spatial, fig.cap="**Figure 2.1:** True spatial patterns for each bench (edge effects with diagonal asymmetry). A single shared colour scale is used across all four panels to directly convey the 4-fold increase in spatial severity from Bench1 (intensity = 15) to Bench4 (intensity = 60, dominant yellow-to-purple contrast). The pattern mimics glasshouse edge effects: elevated phenotypes at borders, depressed in the interior."}
 knitr::include_graphics("figures/s2_true_spatial.png")
 ```
 
 ### Per-bench SpATS BLUPs: the shrinkage problem
 
-With unreplicated within-bench data, running SpATS for each bench separately is limited to BLUPs. The figure below shows that BLUPs are systematically compressed relative to the true genotype values with the slope against the 1:1 line visibly less than 1 in every bench. This pattern becomes visibly more apparent as the intensity of the spatial pattern increases:
+With unreplicated within-bench data, running SpATS for each bench separately is limited to BLUPs. The figure below shows that BLUPs are systematically compressed relative to the true genotype values with the slope against the 1:1 line visibly less than 1 in every bench:
 
 ```{r s2-blup-shrinkage, fig.cap="**Figure 2.2:** Per-bench SpATS BLUPs vs true genotype values. In every bench, BLUPs are compressed toward the mean (the cloud is flatter than the 1:1 reference line in red). Crucially, the degree of shrinkage is similar across all four benches regardless of spatial severity; shrinkage is a property of the random genotype model, not of the spatial correction. Averaging BLUPs across benches reduces noise but cannot remove the shrinkage bias."}
 knitr::include_graphics("figures/s2_blup_shrinkage.png")
@@ -239,22 +254,7 @@ knitr::include_graphics("figures/s2_blup_shrinkage.png")
 
 ### Joint model specifications
 
-#### Joint mgcv model
-
-The joint mgcv model fits a single GAM across all benches with per-bench spatial surfaces:
-
-$$y_{ijk} = g_i + \beta_k + f_k(r_j, c_j) + \rho_{j(k)} + \kappa_{j(k)} + \varepsilon_{ijk}$$
-
-| Term | Type | Description |
-|------|------|-------------|
-| $g_i$ | Fixed (`0 + Genotype`) | Genotype effect: each coefficient is directly a BLUE |
-| $\beta_k$ | Fixed (`bench_f`) | Bench main effect: absorbs overall bench-level differences. Required because factor-by smooths `te(..., by=bench_f)` are centred. |
-| $f_k(r, c)$ | Penalised smooth (`te(..., by=bench_f)`) | Separate spatial surface per bench, each with its own independently estimated smoothness |
-| $\rho_{j(k)}$ | Random (`s(row_f, bench_f, bs="re")`) | Row random intercept nested within bench |
-| $\kappa_{j(k)}$ | Random (`s(col_f, bench_f, bs="re")`) | Column random intercept nested within bench |
-| $\varepsilon_{ijk}$ | $N(0, \sigma^2_e)$ | Plot-level residual |
-
-BLUEs are extracted directly as `coef(m)[paste0("Genotype", levels)]`.
+We can do this using the existing sommer package (with caveats below) or extend our more general modelling approach using the `mgcv` package.
 
 #### Joint sommer model
 
@@ -276,14 +276,39 @@ $$y_{ijk} = \mu + g_i + \beta_k + u_{jk} + \rho_{j(k)} + \kappa_{j(k)} + \vareps
 
 BLUEs are recovered via `X_pred %*% m$b`, constructing predictions at each bench level and averaging per genotype.
 
+#### Joint mgcv model
+
+The joint mgcv model fits a single GAM across all benches with per-bench spatial surfaces:
+
+$$y_{ijk} = g_i + \beta_k + f_k(r_j, c_j) + \rho_{j(k)} + \kappa_{j(k)} + \varepsilon_{ijk}$$
+
+```r
+gam(yield ~ 0 + Genotype + bench_f +
+      te(row, col, bs = "ps", by = bench_f) +
+      s(row_f, bench_f, bs = "re") +
+      s(col_f, bench_f, bs = "re"),
+    data = df, method = "REML")
+```
+
+| Term | Type | Description |
+|------|------|-------------|
+| $g_i$ | Fixed (`0 + Genotype`) | Genotype effect: each coefficient is directly a BLUE |
+| $\beta_k$ | Fixed (`bench_f`) | Bench main effect: absorbs overall bench-level differences. Required because factor-by smooths `te(..., by=bench_f)` are centred. |
+| $f_k(r, c)$ | Penalised smooth (`te(..., by=bench_f)`) | Separate spatial surface per bench, each with its own independently estimated smoothness |
+| $\rho_{j(k)}$ | Random (`s(row_f, bench_f, bs="re")`) | Row random intercept nested within bench |
+| $\kappa_{j(k)}$ | Random (`s(col_f, bench_f, bs="re")`) | Column random intercept nested within bench |
+| $\varepsilon_{ijk}$ | $N(0, \sigma^2_e)$ | Plot-level residual |
+
+BLUEs are extracted directly as `coef(m)[paste0("Genotype", levels)]`.
+
 ### Validation results
 
 Four approaches are compared:
 
 1. **Uncorrected:** raw per-genotype mean across benches (no spatial correction)
 2. **Per-bench SpATS BLUPs averaged:** per-bench SpATS with genotype as random, BLUPs averaged
-3. **Joint mgcv BLUEs:** single joint GAM, genotype as fixed effect
-4. **Joint sommer BLUEs:** single joint mixed model, genotype as fixed effect
+3. **Joint sommer BLUEs:** single joint mixed model, genotype as fixed effect
+4. **Joint mgcv BLUEs:** single joint GAM, genotype as fixed effect
 
 #### Summary metrics
 
@@ -296,31 +321,31 @@ knitr::kable(summary_df, digits = c(0, 4, 2),
 
 #### Estimated spatial trends
 
-```{r s2-mgcv-spatial, fig.cap="**Figure 2.3:** Estimated spatial trends from the joint mgcv model. Shared colour scale across panels (same scale as Figure 2.1). Bench1 (intensity = 15) shows a moderate edge-effect pattern, correctly estimated with low spatial amplitude. Bench4 (intensity = 60) shows the strong edge-effect pattern, correctly recovered. The model adapts spatial complexity independently to each bench via the te(..., by=bench_f) term."}
-knitr::include_graphics("figures/s2_mgcv_joint_spatial.png")
+```{r s2-sommer-spatial, fig.cap="**Figure 2.3:** Estimated spatial trends from the joint sommer model (column-offset approach). Shared colour scale across panels (same scale as Figure 2.1). The overall patterns align with the true spatial structure (Figure 2.1). However, the magnitude of the estimated surfaces is systematically attenuated, particularly in benches with higher intensity. This attenuation is caused by B-spline boundary penalisation at the column edges and is the root cause of the BLUE upward shift described below."}
+knitr::include_graphics("figures/s2_sommer_joint_spatial.png")
 ```
 
-```{r s2-sommer-spatial, fig.cap="**Figure 2.4:** Estimated spatial trends from the joint sommer model (column-offset approach). Shared colour scale across panels. The overall patterns align with both the true spatial structure (Figure 2.1) and the mgcv estimates (Figure 2.3). However, the magnitude of the estimated surfaces is systematically attenuated, particularly in benches with higher intensity. This attenuation is caused by B-spline boundary penalisation at the column edges and is the root cause of the BLUE upward shift described below."}
-knitr::include_graphics("figures/s2_sommer_joint_spatial.png")
+```{r s2-mgcv-spatial, fig.cap="**Figure 2.4:** Estimated spatial trends from the joint mgcv model. Shared colour scale across panels (same scale as Figure 2.1). Bench1 (intensity = 15) shows a moderate edge-effect pattern, correctly estimated with low spatial amplitude. Bench4 (intensity = 60) shows the strong edge-effect pattern, correctly recovered. The model adapts spatial complexity independently to each bench via the te(..., by=bench_f) term."}
+knitr::include_graphics("figures/s2_mgcv_joint_spatial.png")
 ```
 
 #### Scatter plots: estimates vs true genotype values
 
-```{r s2-scatter, fig.cap="**Figure 2.5:** Estimated vs true genotype values for all four approaches. Joint mgcv BLUEs (bottom left) cluster tightly around the 1:1 line across the full range of true values. Joint sommer BLUEs (bottom right) also correlate well with true values but show a systematic upward shift above the 1:1 line; all estimates are positively biased. Per-bench SpATS BLUP averages (top right) show visible compression toward the mean: the cloud is narrower on the y-axis than on the x-axis. Uncorrected means (top left) show wider scatter caused by unremoved spatial bias."}
+```{r s2-scatter, fig.cap="**Figure 2.5:** Estimated vs true genotype values for all four approaches. Per-bench SpATS BLUP averages (top right) show visible compression toward the mean: the cloud is narrower on the y-axis than on the x-axis. Uncorrected means (top left) show wider scatter caused by unremoved spatial bias. Joint sommer BLUEs (bottom left) correlate well with true values but show a systematic upward shift above the 1:1 line; all estimates are positively biased. Joint mgcv BLUEs (bottom right) cluster tightly around the 1:1 line across the full range of true values."}
 knitr::include_graphics("figures/s2_scatter_estimates_vs_true.png")
 ```
 
 #### Why sommer joint BLUEs are shifted above the 1:1 line
 
-The scatter plot (Figure 2.5) shows that all sommer joint BLUEs are positively biased and sit consistently above the 1:1 reference line rather than scattered around it. This is not a model failure but an artefact of the column-offset trick interacting with the edge-effect spatial pattern (type 6).
+The scatter plot (Figure 2.5) shows that all sommer joint BLUEs are positively biased and sit consistently above the 1:1 reference line rather than scattered around it. This is not a model failure but an artefact of the column-offset trick interacting with the edge-effect spatial pattern.
 
-The column-offset trick assigns non-overlapping column coordinate ranges to each bench, with 10× gaps between them (e.g., Bench1: cols 1–30, Bench2: cols 301–330). Within the single `spl2Dc` fit, B-spline basis functions at the boundary of each bench's column range extend into the adjacent empty gap region. Because there are no observations in the gap, REML penalises these boundary basis functions strongly toward zero effectively forcing the estimated spatial surface to be flat near each bench's column edges.
+The column-offset trick assigns non-overlapping column coordinate ranges to each bench, with 10× gaps between them (e.g., Bench1: cols 1–30, Bench2: cols 301–330). Within the single `spl2Dc` fit, B-spline basis functions at the boundary of each bench's column range extend into the adjacent empty gap region. Because there are no observations in the gap, REML penalises these boundary basis functions strongly toward zero, effectively forcing the estimated spatial surface to be flat near each bench's column edges.
 
-The type 6 spatial pattern is strongest precisely at the borders and the edges where the B-spline penalty is most aggressive. As a result, sommer systematically underestimates the spatial correction near the column boundaries, leaving a residual positive spatial signal unaccounted for. Since sommer's spatial term is a random effect constrained to be mean zero, this unmodelled positive signal has nowhere to go except the bench fixed effects, which absorb it as a positive offset. Every genotype BLUE is then inflated by this bench-specific constant, producing the uniform upward shift visible in Figure 2.5.
+The edge-effect spatial pattern is strongest precisely at the borders where the B-spline penalty is most aggressive. As a result, sommer systematically underestimates the spatial correction near the column boundaries, leaving a residual positive spatial signal unaccounted for. Since sommer's spatial term is a random effect constrained to be mean zero, this unmodelled positive signal has nowhere to go except the bench fixed effects, which absorb it as a positive offset. Every genotype BLUE is then inflated by this bench-specific constant, producing the uniform upward shift visible in Figure 2.5.
 
 The magnitude of the shift scales with spatial intensity: benches with stronger edge effects have larger column-boundary underestimation and therefore larger BLUE inflation. This is confirmed by the per-bench spatial component means, which are all negative (approximately −2, −4, −6, and −9 units for benches 1 through 4 at intensities 15, 25, 40, and 60 respectively), exactly compensating for the positive offset absorbed into the fixed effects. The net effect is that sommer correlation with true values remains high (r ≈ 0.985), rankings are preserved, but the RMSE is inflated relative to mgcv.
 
-This limitation is specific to the column-offset workaround. A native `vsm(dsm(bench), spl2Dc(...))` implementation would fit each bench's surface with proper column boundaries, eliminating the gap-induced penalty. Until sommer supports this syntax, joint mgcv (`te(..., by=bench_f)`) is the preferred approach for designs with strong column-edge spatial patterns.
+This limitation is specific to the column-offset workaround. A native `vsm(dsm(bench), spl2Dc(...))` implementation would fit each bench's surface with proper column boundaries, eliminating the gap-induced penalty. Until sommer supports this syntax, joint mgcv (`te(..., by=bench_f)`) is the preferred approach for designs with strong edge spatial patterns.
 
 #### Per-bench residual SD
 
@@ -337,29 +362,29 @@ knitr::kable(resid_df, digits = c(0, 0, 0, 2),
 
 The RMSE for joint mgcv BLUEs (~2.1) is approximately 3× lower than for averaged per-bench SpATS BLUPs (~6.2). The RMSE difference is driven by shrinkage: BLUPs compress the genotype value range toward the mean, inflating RMSE even when correlations are similar. BLUEs estimate actual genotype means without shrinkage, producing estimates on the correct scale which is essential for GWAS where effect sizes matter.
 
-#### Joint mgcv recovers genotype values with high accuracy
-
-Joint mgcv (r ≈ 0.986, RMSE ≈ 2.1) substantially outperforms the per-bench approach. Its fixed-effect spatial smooth (`te(..., by=bench_f)`) can absorb spatial variation at all scales with proper per-bench boundaries, producing near-unbiased BLUEs across the full intensity range.
-
 #### Joint sommer preserves rankings but shows a systematic BLUE offset
 
 Joint sommer (r ≈ 0.985, RMSE ≈ 5.8) preserves genotype rankings almost as well as mgcv, but inflated RMSE relative to mgcv reflects the systematic upward bias in BLUEs caused by the column-offset boundary artefact described above. For applications where BLUE magnitude matters (e.g., GWAS effect size estimation), joint mgcv is preferred. For ranking-based applications, both methods perform comparably.
 
+#### Joint mgcv recovers genotype values with high accuracy
+
+Joint mgcv (r ≈ 0.986, RMSE ≈ 2.1) substantially outperforms the per-bench approach. Its fixed-effect spatial smooth (`te(..., by=bench_f)`) can absorb spatial variation at all scales with proper per-bench boundaries, producing near-unbiased BLUEs across the full intensity range.
+
 #### Per-bench spatial surfaces adapt correctly across the full intensity range
 
-Residual SD is consistent across all four benches (3.3–3.6) despite a 4-fold variation in spatial intensity (15 to 60 units). This confirms that both `te(..., by=bench_f)` and the column-offset `spl2Dc` fit genuinely independent surfaces that scale correctly from the moderate pattern of Bench1 to the strong edge effects of Bench4.
+Residual SD is consistent across all four benches (3.3–3.6) despite a 4-fold variation in spatial intensity (15 to 60 units). This confirms that both the column-offset `spl2Dc` and `te(..., by=bench_f)` fit genuinely independent surfaces that scale correctly from the moderate pattern of Bench1 to the strong edge effects of Bench4.
 
 #### SpATS per-bench is limited to BLUPs in this design
 
-SpATS cannot produce BLUEs from unreplicated within-bench data and does not natively support joint multi-bench models. For the glasshouse designs we typically use (unreplicated within bench, replicated across benches), mgcv or sommer joint models are required to obtain proper BLUEs.
+SpATS cannot produce BLUEs from unreplicated within-bench data and does not natively support joint multi-bench models. For the glasshouse designs we typically use (unreplicated within bench, replicated across benches), sommer or mgcv joint models are required to obtain proper BLUEs.
 
 ### Package dependencies
 
 | Package | Version | Role |
 |---------|---------|------|
 | SpATS | 1.0.19 | 2D P-spline spatial correction (SAP) |
-| mgcv | 1.9.4 | GAM with tensor-product smooths |
 | sommer | 4.4.4 | Mixed model with `spl2Dc` spatial random effect |
+| mgcv | 1.9.4 | GAM with tensor-product smooths |
 | ggplot2 | - | Heatmap and variogram plots |
 | patchwork | - | Multi-panel figure layout |
 
@@ -376,7 +401,7 @@ SpATS cannot produce BLUEs from unreplicated within-bench data and does not nati
 
 ## Appendix: Joint mgcv performance under row and column gradient patterns
 
-The main analysis used a type 6 edge-effect spatial pattern. This appendix tests the joint mgcv model under three additional spatial patterns (a row gradient, a column gradient, and a localised hotspot) using the same 4-bench unreplicated design with intensities 15, 25, 40, 60. Row and column gradients are among the most common spatial artefacts in glasshouse trials (e.g., uneven watering along rows, light attenuation along bench columns). The hotspot pattern mimics a localised point-source disturbance such as a roof leak or a faulty irrigation emitter, affecting approximately 20% of pots in a circular region located off-centre within the bench.
+The main analysis used an edge-effect spatial pattern. This appendix tests the joint mgcv model under three additional spatial patterns (a row gradient, a column gradient, and a localised hotspot) using the same 4-bench unreplicated design with intensities 15, 25, 40, 60. Row and column gradients are among the most common spatial artefacts in glasshouse trials (e.g., uneven watering along rows, light attenuation along bench columns). The hotspot pattern mimics a localised point-source disturbance such as a roof leak or a faulty irrigation emitter, affecting approximately 20% of pots in a circular region located off-centre within the bench.
 
 All three patterns are centred to mean zero per bench, so the spatial effect represents a deviation from the bench mean rather than an absolute level shift. Genotype SD = 12, error SD = 4.
 
@@ -404,7 +429,7 @@ knitr::include_graphics("figures/sa_scatter.png")
 app_df <- read.csv("../output/appendix/appendix_summary.csv")
 knitr::kable(app_df, digits = c(0, 0, 4, 2),
              col.names = c("Pattern", "Approach", "r(est, true)", "RMSE"),
-             caption = "**Table A1:** Genotype recovery accuracy for row and column gradient patterns. Joint mgcv BLUEs achieve substantially lower RMSE than per-bench SpATS BLUPs despite similar correlations, confirming that the BLUE/BLUP distinction (not spatial correction quality) drives the difference. Results are consistent across both gradient directions.")
+             caption = "**Table A1:** Genotype recovery accuracy for row gradient, column gradient, and localised hotspot patterns. Joint mgcv BLUEs achieve substantially lower RMSE than per-bench SpATS BLUPs despite similar correlations, confirming that the BLUE/BLUP distinction (not spatial correction quality) drives the difference. Results are consistent across all three pattern types.")
 ```
 
 ### Summary
