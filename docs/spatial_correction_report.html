@@ -1294,83 +1294,6 @@ window.buildTabsets = function(tocID) {
 };
 
 </script>
-<script>
-window.initializeCodeFolding = function(show) {
-
-  // handlers for show-all and hide all
-  $("#rmd-show-all-code").click(function() {
-    $('div.r-code-collapse').each(function() {
-      $(this).collapse('show');
-    });
-  });
-  $("#rmd-hide-all-code").click(function() {
-    $('div.r-code-collapse').each(function() {
-      $(this).collapse('hide');
-    });
-  });
-
-  // index for unique code element ids
-  var currentIndex = 1;
-
-  // select all R code blocks
-  var rCodeBlocks = $('pre.r, pre.python, pre.bash, pre.sql, pre.cpp, pre.stan, pre.julia, pre.foldable');
-  rCodeBlocks.each(function() {
-    // skip if the block has fold-none class
-    if ($(this).hasClass('fold-none')) return;
-
-    // create a collapsable div to wrap the code in
-    var div = $('<div class="collapse r-code-collapse"></div>');
-    var showThis = (show || $(this).hasClass('fold-show')) && !$(this).hasClass('fold-hide');
-    var id = 'rcode-643E0F36' + currentIndex++;
-    div.attr('id', id);
-    $(this).before(div);
-    $(this).detach().appendTo(div);
-
-    // add a show code button right above
-    var showCodeText = $('<span>' + (showThis ? 'Hide' : 'Show') + '</span>');
-    var showCodeButton = $('<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm code-folding-btn pull-right float-right"></button>');
-    showCodeButton.append(showCodeText);
-    showCodeButton
-        .attr('data-toggle', 'collapse')
-        .attr('data-bs-toggle', 'collapse') // BS5
-        .attr('data-target', '#' + id)
-        .attr('data-bs-target', '#' + id)   // BS5
-        .attr('aria-expanded', showThis)
-        .attr('aria-controls', id);
-
-    var buttonRow = $('<div class="row"></div>');
-    var buttonCol = $('<div class="col-md-12"></div>');
-
-    buttonCol.append(showCodeButton);
-    buttonRow.append(buttonCol);
-
-    div.before(buttonRow);
-
-    // show the div if necessary
-    if (showThis) div.collapse('show');
-
-    // update state of button on show/hide
-    //   * Change text
-    //   * add a class for intermediate states styling
-    div.on('hide.bs.collapse', function () {
-      showCodeText.text('Show');
-      showCodeButton.addClass('btn-collapsing');
-    });
-    div.on('hidden.bs.collapse', function () {
-      showCodeButton.removeClass('btn-collapsing');
-    });
-    div.on('show.bs.collapse', function () {
-      showCodeText.text('Hide');
-      showCodeButton.addClass('btn-expanding');
-    });
-    div.on('shown.bs.collapse', function () {
-      showCodeButton.removeClass('btn-expanding');
-    });
-
-  });
-
-}
-</script>
 
 <style type="text/css">
 code{white-space: pre-wrap;}
@@ -1455,15 +1378,6 @@ code span.st { color: #4e9a06; }
 code span.va { color: #000000; } 
 code span.vs { color: #4e9a06; } 
 code span.wa { color: #8f5902; font-weight: bold; font-style: italic; } 
-.sourceCode .row {
-width: 100%;
-}
-.sourceCode {
-overflow-x: auto;
-}
-.code-folding-btn {
-margin-right: -30px;
-}
 </style>
 <script>
 // apply pandoc div.sourceCode style to pre.sourceCode instead
@@ -1575,9 +1489,6 @@ display: none;
 </style>
 
 <!-- code folding -->
-<style type="text/css">
-.code-folding-btn { margin-bottom: 4px; }
-</style>
 
 
 
@@ -1654,14 +1565,6 @@ border-radius: 0px;
 
 
 <div id="header">
-
-<div class="btn-group pull-right float-right">
-<button type="button" class="btn btn-default btn-xs btn-secondary btn-sm dropdown-toggle" data-toggle="dropdown" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><span>Code</span> <span class="caret"></span></button>
-<ul class="dropdown-menu dropdown-menu-right" style="min-width: 50px;">
-<li><a id="rmd-show-all-code" href="#">Show All Code</a></li>
-<li><a id="rmd-hide-all-code" href="#">Hide All Code</a></li>
-</ul>
-</div>
 
 
 
@@ -1906,6 +1809,7 @@ arguments</h4>
 smooth for the spatial surface:</p>
 <p><span class="math display">\[y_{irc} = g_i + \text{te}(r, c) +
 \varepsilon_{irc}\]</span></p>
+<p>R code verison:</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">gam</span>(yield <span class="sc">~</span> <span class="dv">0</span> <span class="sc">+</span> Genotype <span class="sc">+</span> <span class="fu">te</span>(row, col), <span class="at">data =</span> df, <span class="at">method =</span> <span class="st">&quot;REML&quot;</span>)</span></code></pre></div>
 <table>
 <colgroup>
@@ -2167,6 +2071,7 @@ replicated data is largely one of convenience.</p>
 \text{bs}=\text{&quot;ps&quot;}) + s(\text{row}_r,
 \text{bs}=\text{&quot;re&quot;}) + s(\text{col}_c,
 \text{bs}=\text{&quot;re&quot;}) + \varepsilon_{irc}\]</span></p>
+<p>Or if you prefer the R code version:</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="fu">gam</span>(yield <span class="sc">~</span> <span class="dv">0</span> <span class="sc">+</span> Genotype <span class="sc">+</span></span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>      <span class="fu">te</span>(row, col, <span class="at">bs =</span> <span class="st">&quot;ps&quot;</span>) <span class="sc">+</span></span>
 <span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>      <span class="fu">s</span>(row_f, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>) <span class="sc">+</span> <span class="fu">s</span>(col_f, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>),</span>
@@ -2349,6 +2254,7 @@ model</h4>
 per-bench spatial surfaces:</p>
 <p><span class="math display">\[y_{ijk} = g_i + \beta_k + f_k(r_j, c_j)
 + \rho_{j(k)} + \kappa_{j(k)} + \varepsilon_{ijk}\]</span></p>
+<p>Or in R ‘speak’:</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="fu">gam</span>(yield <span class="sc">~</span> <span class="dv">0</span> <span class="sc">+</span> Genotype <span class="sc">+</span> bench_f <span class="sc">+</span></span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>      <span class="fu">te</span>(row, col, <span class="at">bs =</span> <span class="st">&quot;ps&quot;</span>, <span class="at">by =</span> bench_f) <span class="sc">+</span></span>
 <span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>      <span class="fu">s</span>(row_f, bench_f, <span class="at">bs =</span> <span class="st">&quot;re&quot;</span>) <span class="sc">+</span></span>
@@ -2939,11 +2845,6 @@ $(document).ready(function () {
 </script>
 
 <!-- code folding -->
-<script>
-$(document).ready(function () {
-  window.initializeCodeFolding("hide" === "show");
-});
-</script>
 
 <script>
 $(document).ready(function ()  {

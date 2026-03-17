@@ -12,7 +12,7 @@ output:
     highlight: tango
     fig_width: 10
     fig_height: 7
-    code_folding: hide
+
 ---
 
 ```{r setup, include=FALSE}
@@ -120,6 +120,8 @@ mgcv fits a generalised additive model (GAM) with a tensor-product smooth for th
 
 $$y_{irc} = g_i + \text{te}(r, c) + \varepsilon_{irc}$$
 
+R code verison:
+
 ```r
 gam(yield ~ 0 + Genotype + te(row, col), data = df, method = "REML")
 ```
@@ -205,6 +207,8 @@ The optimised mgcv model (`mgcv_ps_re`) is:
 
 $$y_{irc} = g_i + \text{te}(r, c, \text{bs}=\text{"ps"}) + s(\text{row}_r, \text{bs}=\text{"re"}) + s(\text{col}_c, \text{bs}=\text{"re"}) + \varepsilon_{irc}$$
 
+Or if you prefer the R code version: 
+
 ```r
 gam(yield ~ 0 + Genotype +
       te(row, col, bs = "ps") +
@@ -281,6 +285,8 @@ BLUEs are recovered via `X_pred %*% m$b`, constructing predictions at each bench
 The joint mgcv model fits a single GAM across all benches with per-bench spatial surfaces:
 
 $$y_{ijk} = g_i + \beta_k + f_k(r_j, c_j) + \rho_{j(k)} + \kappa_{j(k)} + \varepsilon_{ijk}$$
+
+Or in R 'speak':
 
 ```r
 gam(yield ~ 0 + Genotype + bench_f +
